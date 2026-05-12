@@ -66,6 +66,7 @@ class SLDParams:
     A_cross: float = field(init=False)
     dz: float = field(init=False)
     P_sat: float = field(init=False)   # saturation power (W)
+    tau_coh: float = field(init=False)  # optical coherence time (s)
 
     def __post_init__(self):
         self.V = self.L * self.w * self.d
@@ -77,6 +78,7 @@ class SLDParams:
         # Use tau_c at ~2x transparency as representative carrier lifetime
         tau_c = self.carrier_lifetime(self.N_tr * 2)
         self.P_sat = h * self.nu0 * self.A_cross / (self.Gamma * self.a * tau_c)
+        self.tau_coh = 1.0 / (np.pi * self.delta_nu)
 
     def gain(self, N, P_local=0.0):
         """Material gain g(N) in m^-1 with power-based saturation.
@@ -244,29 +246,36 @@ def solve_sld_steady_state(sld, I_sld, relax=0.3, max_iter=500, tol=1e-6):
 
 # ── SLD output → injection field ─────────────────────────────────────────────
 
-def sld_to_injection_field(sld, P_sld_out, laser, inj):
+def sld_to_injection_field(sld, P_sld_out, laser, inj,
+                           acceptance_bandwidth=None):
     """
     Convert total broadband SLD output power to injected photon density
     inside the DFB laser cavity.
 
-    Only the spectral slice of the SLD within the DFB cavity resonance
-    bandwidth contributes to coherent injection.
+    For coherent (Lang-Kobayashi) injection, only the spectral slice
+    within the cold-cavity resonance bandwidth contributes. For
+    incoherent injection into a gain-switched laser, the acceptance
+    bandwidth is wider — set by the gain bandwidth or the cold-cavity
+    linewidth (v_g * (alpha_i + alpha_m) / (2*pi)).
+
+    Parameters
+    ----------
+    acceptance_bandwidth : float or None
+        Spectral bandwidth (Hz) of SLD light coupling into the mode.
+        Default: full cold-cavity linewidth v_g*(alpha_i + alpha_m)/(2*pi).
 
     Returns (S_inj, phi_inj).
     """
-    # DFB cavity resonance bandwidth
-    delta_nu_laser = laser.v_g * laser.alpha_m / (2 * np.pi)
+    if acceptance_bandwidth is None:
+        acceptance_bandwidth = laser.v_g * (laser.alpha_i + laser.alpha_m) / (2 * np.pi)
 
-    # Fraction of SLD spectrum within DFB resonance
-    spectral_fraction = delta_nu_laser / sld.delta_nu
+    spectral_fraction = min(acceptance_bandwidth / sld.delta_nu, 1.0)
 
-    # Coupled coherent power
-    P_coherent = P_sld_out * spectral_fraction * inj.eta_coupling
+    P_coupled = P_sld_out * spectral_fraction * inj.eta_coupling
 
-    # Convert to intracavity photon density: P = h*nu * V * S / tau_p
-    S_inj = P_coherent * laser.tau_p / (h * laser.nu0 * laser.V)
+    S_inj = P_coupled * laser.tau_p / (h * laser.nu0 * laser.V)
 
-    return S_inj, 0.0  # phi_inj = 0 (CW phase reference)
+    return S_inj, 0.0
 
 
 # ── Modified laser rate equations with injection ──────────────────────────────
@@ -329,6 +338,83 @@ def solve_transient_injection(params, I_func, inj, S_inj,
         rtol=1e-9, atol=1e-12,
         max_step=(t_span[1] - t_span[0]) / 2000,
     )
+    return sol
+
+
+def solve_transient_injection_stochastic(params, I_func, inj, S_inj,
+                                          sld_tau_coh, t_span=None,
+                                          t_eval=None, y0=None, seed=None):
+    """Euler-Maruyama solver with incoherent SLD injection via complex field.
+
+    Works with the complex field amplitude E = sqrt(S)*exp(i*phi) directly.
+    SLD photons are injected as random-phase phasors: when they outnumber
+    the residual laser photons during the off phase, they overwrite the
+    intracavity phase — destroying inter-pulse correlations. Spontaneous
+    emission is treated identically (random-phase phasor addition).
+
+    The coherence threshold occurs when the SLD photon number accumulated
+    during the off phase exceeds the residual laser photon number.
+    """
+    if t_span is None:
+        t_span = [0, 20e-9]
+    if y0 is None:
+        y0 = [params.N_tr, 1e10, 0.0]
+    if t_eval is None:
+        t_eval = np.linspace(t_span[0], t_span[1], 10000)
+
+    rng = np.random.default_rng(seed)
+    n_steps = len(t_eval)
+    dt = t_eval[1] - t_eval[0]
+
+    N_arr = np.zeros(n_steps)
+    S_arr = np.zeros(n_steps)
+    phi_arr = np.zeros(n_steps)
+    N_arr[0] = y0[0]
+    S_arr[0] = max(y0[1], 1e-10)
+    phi_arr[0] = y0[2]
+
+    E = np.sqrt(S_arr[0]) * np.exp(1j * phi_arr[0])
+
+    sqrt_half_dt = np.sqrt(dt / 2)
+
+    for k in range(n_steps - 1):
+        Nk = N_arr[k]
+        Sk = max(np.abs(E)**2, 1e-10)
+
+        I = I_func(t_eval[k])
+        g = params.gain(Nk, Sk)
+        R_sp = params.A * Nk + params.B * Nk**2 + params.C * Nk**3
+        R_sp_mode = params.beta_sp * params.B * Nk**2
+
+        S_i = S_inj(t_eval[k]) if callable(S_inj) else S_inj
+        S_i = max(S_i, 0.0)
+        R_SLD = S_i / params.tau_p
+
+        net_gain = 0.5 * (1 + 1j * params.alpha_H) * (
+            params.Gamma * params.v_g * g - 1 / params.tau_p
+        )
+        E = E * (1 + net_gain * dt)
+
+        E += np.sqrt(R_sp_mode) * sqrt_half_dt * (
+            rng.standard_normal() + 1j * rng.standard_normal()
+        )
+        E += np.sqrt(R_SLD) * sqrt_half_dt * (
+            rng.standard_normal() + 1j * rng.standard_normal()
+        )
+
+        dN = (I / (q * params.V) - R_sp
+              - params.Gamma * params.v_g * g * Sk) * dt
+        F_N = np.sqrt(2 * R_sp * dt) * rng.standard_normal()
+        N_arr[k + 1] = Nk + dN + F_N
+
+        S_arr[k + 1] = max(np.abs(E)**2, 1e-10)
+        phi_arr[k + 1] = np.angle(E)
+
+    class _Solution:
+        pass
+    sol = _Solution()
+    sol.t = t_eval
+    sol.y = np.array([N_arr, S_arr, phi_arr])
     return sol
 
 

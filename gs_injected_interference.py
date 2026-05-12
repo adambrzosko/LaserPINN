@@ -32,6 +32,7 @@ from sld_injection import (
     SLDParams, InjectionParams,
     solve_sld_steady_state, sld_to_injection_field,
     rate_equations_injection, solve_transient_injection,
+    solve_transient_injection_stochastic,
 )
 from gain_switched_interference import (
     GainSwitchParams, make_gain_switch_current,
@@ -45,12 +46,13 @@ from gain_switched_interference import (
 # ── Injected pulse train simulation ─────────────────────────────────────────
 
 def simulate_injected_pulse_train(laser, gs, sld, inj, S_inj,
-                                  pts_per_period=2000):
+                                  pts_per_period=2000, seed=None):
     """
-    Simulate a gain-switched DFB pulse train with CW SLD injection.
+    Simulate a gain-switched DFB pulse train with incoherent SLD injection.
 
-    Uses the Lang-Kobayashi modified rate equations from sld_injection.py
-    driven by the gain-switching current waveform.
+    Uses Euler-Maruyama with Langevin noise and a Wiener-process SLD
+    injection phase (diffusion rate 1/tau_coh) to model the broadband
+    incoherence of the SLD source.
 
     Parameters
     ----------
@@ -60,6 +62,7 @@ def simulate_injected_pulse_train(laser, gs, sld, inj, S_inj,
     inj : InjectionParams  — must have compute_derived() already called
     S_inj : float — injected intracavity photon density (constant / CW)
     pts_per_period : int — time-domain resolution
+    seed : int or None — RNG seed for reproducibility
 
     Returns
     -------
@@ -72,14 +75,18 @@ def simulate_injected_pulse_train(laser, gs, sld, inj, S_inj,
     n_pts = gs.n_periods * pts_per_period
     t_eval = np.linspace(0, t_total, n_pts)
 
-    print(f"    Solving injected rate equations "
-          f"({t_total*1e9:.0f} ns, {n_pts} points)...")
+    R_SLD = S_inj / laser.tau_p
+    R_sp_mode_est = laser.beta_sp * laser.B * laser.N_tr**2
+    print(f"    Solving stochastic injected rate equations "
+          f"({t_total*1e9:.0f} ns, {n_pts} points, "
+          f"R_SLD/R_sp = {R_SLD/R_sp_mode_est:.1f}×)...")
 
-    sol = solve_transient_injection(
+    sol = solve_transient_injection_stochastic(
         laser, I_func, inj, S_inj,
-        phi_inj_func=None,
+        sld_tau_coh=sld.tau_coh,
         t_span=[0, t_total],
         t_eval=t_eval,
+        seed=seed,
     )
 
     # Discard transient
@@ -320,6 +327,10 @@ def parse_args():
                    help='Frequency detuning nu_laser - nu_SLD (Hz)')
     s.add_argument('--sld_lambda', type=float, default=1550e-9,
                    help='SLD center wavelength (m)')
+    s.add_argument('--acceptance_bw', type=float, default=None,
+                   help='Acceptance bandwidth for SLD coupling into cavity mode (Hz). '
+                        'Default: cold-cavity linewidth v_g*(alpha_i+alpha_m)/(2*pi). '
+                        'Set wider (e.g. 1e12) to model gain-broadened acceptance.')
 
     # Output
     o = p.add_argument_group('Output')
@@ -379,9 +390,13 @@ def main():
     print(f"       P_sld_out = {P_sld*1e3:.2f} mW  "
           f"({'converged' if sld_result['converged'] else 'NOT converged'})")
 
-    S_inj, _ = sld_to_injection_field(sld, P_sld, laser, inj)
+    S_inj, _ = sld_to_injection_field(sld, P_sld, laser, inj,
+                                       acceptance_bandwidth=args.acceptance_bw)
+    acc_bw = args.acceptance_bw if args.acceptance_bw else laser.v_g * (laser.alpha_i + laser.alpha_m) / (2 * np.pi)
     print(f"  Injection:  η = {args.eta_coupling:.0%}, "
           f"Δν = {args.delta_nu*1e-9:.1f} GHz")
+    print(f"       acceptance BW = {acc_bw*1e-9:.1f} GHz "
+          f"(spectral fraction = {min(acc_bw/sld.delta_nu, 1.0):.2e})")
     print(f"       κ = {inj.kappa:.2e} s⁻¹, "
           f"S_inj = {S_inj:.2e} m⁻³")
 

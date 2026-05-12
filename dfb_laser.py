@@ -120,6 +120,62 @@ def solve_transient(params, I_func, t_span, t_eval=None, y0=None):
     return sol
 
 
+def solve_transient_stochastic(params, I_func, t_span, t_eval=None, y0=None,
+                                seed=None):
+    """Euler-Maruyama solver with Langevin noise on N, S, and phi.
+
+    Includes spontaneous emission noise required for correct phase
+    dynamics, linewidth, and inter-pulse phase correlations.
+    """
+    if y0 is None:
+        y0 = [params.N_tr, 1e10, 0.0]
+    if t_eval is None:
+        t_eval = np.linspace(t_span[0], t_span[1], 5000)
+
+    rng = np.random.default_rng(seed)
+    n_steps = len(t_eval)
+    dt = t_eval[1] - t_eval[0]
+
+    N_arr = np.zeros(n_steps)
+    S_arr = np.zeros(n_steps)
+    phi_arr = np.zeros(n_steps)
+    N_arr[0], S_arr[0], phi_arr[0] = y0
+
+    sqrt_dt = np.sqrt(dt)
+
+    for k in range(n_steps - 1):
+        Nk = N_arr[k]
+        Sk = max(S_arr[k], 1e-10)
+        phik = phi_arr[k]
+
+        I = I_func(t_eval[k])
+        g = params.gain(Nk, Sk)
+        R_sp = params.A * Nk + params.B * Nk**2 + params.C * Nk**3
+        R_sp_mode = params.beta_sp * params.B * Nk**2
+
+        dN = (I / (q * params.V) - R_sp - params.Gamma * params.v_g * g * Sk) * dt
+        dS = ((params.Gamma * params.v_g * g - 1 / params.tau_p) * Sk + R_sp_mode) * dt
+        dphi = 0.5 * params.alpha_H * (
+            params.Gamma * params.v_g * params.a * (Nk - params.N_tr)
+            - 1 / params.tau_p
+        ) * dt
+
+        F_N = np.sqrt(2 * R_sp) * sqrt_dt * rng.standard_normal()
+        F_S = np.sqrt(2 * R_sp_mode) * sqrt_dt * rng.standard_normal()
+        F_phi = np.sqrt(R_sp_mode / (2 * Sk)) * sqrt_dt * rng.standard_normal()
+
+        N_arr[k + 1] = Nk + dN + F_N
+        S_arr[k + 1] = max(Sk + dS + F_S, 1e-10)
+        phi_arr[k + 1] = phik + dphi + F_phi
+
+    class _Solution:
+        pass
+    sol = _Solution()
+    sol.t = t_eval
+    sol.y = np.array([N_arr, S_arr, phi_arr])
+    return sol
+
+
 # ── Analysis functions ──────────────────────────────────────────────────────────
 
 def plot_transient(params, I_bias, t_end=5e-9):

@@ -15,7 +15,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
-from dfb_laser import DFBLaserParams, solve_transient, q, h, c
+from dfb_laser import DFBLaserParams, solve_transient, solve_transient_stochastic, q, h, c
 
 
 # ── Gain-switching parameters ────────────────────────────────────────────────
@@ -90,9 +90,12 @@ def make_gain_switch_current(gs, I_th):
 
 # ── Pulse train simulation ───────────────────────────────────────────────────
 
-def simulate_pulse_train(laser, gs, pts_per_period=2000):
+def simulate_pulse_train(laser, gs, pts_per_period=2000, seed=None):
     """
-    Simulate gain-switched pulse train using the DFB rate equations.
+    Simulate gain-switched pulse train using stochastic rate equations.
+
+    Uses Euler-Maruyama with Langevin noise on N, S, and phi for correct
+    phase dynamics and inter-pulse coherence properties.
 
     Returns
     -------
@@ -106,8 +109,9 @@ def simulate_pulse_train(laser, gs, pts_per_period=2000):
     n_pts = gs.n_periods * pts_per_period
     t_eval = np.linspace(0, t_total, n_pts)
 
-    print(f"    Solving rate equations ({t_total*1e9:.0f} ns, {n_pts} points)...")
-    sol = solve_transient(laser, I_func, [0, t_total], t_eval=t_eval)
+    print(f"    Solving stochastic rate equations ({t_total*1e9:.0f} ns, {n_pts} points)...")
+    sol = solve_transient_stochastic(laser, I_func, [0, t_total],
+                                      t_eval=t_eval, seed=seed)
 
     # Discard transient
     idx_start = gs.n_discard * pts_per_period
