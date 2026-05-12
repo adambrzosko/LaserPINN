@@ -153,6 +153,6 @@ fig.suptitle(
     fontsize=12,
 )
 plt.tight_layout()
-fig.savefig('coherence_threshold_test.png', dpi=150)
-print(f"\n  Saved: coherence_threshold_test.png")
+fig.savefig('images/coherence_threshold/coherence_threshold_test.png', dpi=150)
+print(f"\n  Saved: images/coherence_threshold/coherence_threshold_test.png")
 plt.close('all')

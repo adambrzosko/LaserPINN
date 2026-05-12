@@ -150,6 +150,6 @@ fig.suptitle(
     fontsize=12,
 )
 plt.tight_layout()
-fig.savefig('coherence_threshold_vs_eta.png', dpi=150)
-print(f"\n  Saved: coherence_threshold_vs_eta.png")
+fig.savefig('images/coherence_threshold/coherence_threshold_vs_eta.png', dpi=150)
+print(f"\n  Saved: images/coherence_threshold/coherence_threshold_vs_eta.png")
 plt.close('all')

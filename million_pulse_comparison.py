@@ -276,8 +276,8 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig1.savefig('1M_phase_coherence_vs_freq.png', dpi=150)
-    print("  Saved: 1M_phase_coherence_vs_freq.png")
+    fig1.savefig('images/1M_pulse_comparison/1M_phase_coherence_vs_freq.png', dpi=150)
+    print("  Saved: images/1M_pulse_comparison/1M_phase_coherence_vs_freq.png")
 
     # ── Figure 2: Phase autocorrelation at selected frequencies ──────────
 
@@ -315,8 +315,8 @@ if __name__ == '__main__':
     axes2[1, 0].set_ylabel('|g$^{(1)}_{pulse}$(m)|')
 
     plt.tight_layout()
-    fig2.savefig('1M_phase_autocorrelation.png', dpi=150)
-    print("  Saved: 1M_phase_autocorrelation.png")
+    fig2.savefig('images/1M_pulse_comparison/1M_phase_autocorrelation.png', dpi=150)
+    print("  Saved: images/1M_pulse_comparison/1M_phase_autocorrelation.png")
 
     # ── Figure 3: Peak intensity distributions ───────────────────────────
 
@@ -353,8 +353,8 @@ if __name__ == '__main__':
     axes3[1, 0].set_ylabel('Probability density')
 
     plt.tight_layout()
-    fig3.savefig('1M_intensity_distributions.png', dpi=150)
-    print("  Saved: 1M_intensity_distributions.png")
+    fig3.savefig('images/1M_pulse_comparison/1M_intensity_distributions.png', dpi=150)
+    print("  Saved: images/1M_pulse_comparison/1M_intensity_distributions.png")
 
     # ── Figure 4: Sampled intensity distributions (mid-pulse) ────────────
 
@@ -394,8 +394,8 @@ if __name__ == '__main__':
     axes4[1, 0].set_ylabel('Probability density')
 
     plt.tight_layout()
-    fig4.savefig('1M_sampled_distributions.png', dpi=150)
-    print("  Saved: 1M_sampled_distributions.png")
+    fig4.savefig('images/1M_pulse_comparison/1M_sampled_distributions.png', dpi=150)
+    print("  Saved: images/1M_pulse_comparison/1M_sampled_distributions.png")
 
     # ── Summary table ────────────────────────────────────────────────────
 
