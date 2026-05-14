@@ -144,7 +144,7 @@ if __name__ == '__main__':
             print(f"  {key:14s} ...", end="", flush=True)
             t0 = _time.time()
 
-            phi, pk_S, sm_S = simulate_pulses(
+            phi, pk_S, sm_S, _ = simulate_pulses(
                 N_PULSES + N_DISCARD, N_DISCARD, pts, dt,
                 I_off, I_on, t_on, t_rise,
                 laser.V, laser.Gamma, laser.v_g, laser.a,

@@ -39,6 +39,7 @@ def simulate_pulses(n_pulses, n_discard, pts_period, dt,
     peak_phi = np.empty(n_out)
     peak_S = np.empty(n_out)
     samp_S = np.empty(n_out)
+    peak_k = np.empty(n_out, dtype=np.int64)
 
     N = N_tr * 1.2
     Er = np.sqrt(1e10)
@@ -50,6 +51,7 @@ def simulate_pulses(n_pulses, n_discard, pts_period, dt,
     for p in range(n_pulses):
         best_S = 0.0
         best_phi = 0.0
+        best_k = 0
         samp = 0.0
         sampled = False
         t_samp = t_on * 0.5
@@ -99,6 +101,7 @@ def simulate_pulses(n_pulses, n_discard, pts_period, dt,
             if S_now > best_S:
                 best_S = S_now
                 best_phi = np.arctan2(Ei, Er)
+                best_k = k
 
             if not sampled and t >= t_samp:
                 samp = S_now
@@ -109,8 +112,9 @@ def simulate_pulses(n_pulses, n_discard, pts_period, dt,
             peak_phi[idx] = best_phi
             peak_S[idx] = best_S
             samp_S[idx] = samp
+            peak_k[idx] = best_k
 
-    return peak_phi, peak_S, samp_S
+    return peak_phi, peak_S, samp_S, peak_k
 
 
 # ── Analysis helpers ─────────────────────────────────────────────────────────
@@ -162,12 +166,13 @@ if __name__ == '__main__':
     # Warm up numba (first call compiles)
     print("\n  Compiling JIT solver...")
     t0 = _time.time()
-    _ = simulate_pulses(
+    _warmup = simulate_pulses(
         100, 10, 100, 1e-12,
         I_off, I_on, 30e-12, 7e-12,
         laser.V, laser.Gamma, laser.v_g, laser.a, laser.N_tr, laser.epsilon,
         laser.A, laser.B, laser.C, laser.tau_p, laser.beta_sp, laser.alpha_H, q,
         0.0, 0)
+    del _warmup
     print(f"  Compiled in {_time.time()-t0:.1f}s")
 
     all_results = {}
@@ -188,7 +193,7 @@ if __name__ == '__main__':
                   f"{pts_period} pts/period ...", end="", flush=True)
 
             t0 = _time.time()
-            phi, pk_S, sm_S = simulate_pulses(
+            phi, pk_S, sm_S, pk_k = simulate_pulses(
                 N_PULSES + N_DISCARD, N_DISCARD, pts_period, dt_actual,
                 I_off, I_on, t_on, t_rise,
                 laser.V, laser.Gamma, laser.v_g, laser.a,
