@@ -117,6 +117,179 @@ def simulate_pulses(n_pulses, n_discard, pts_period, dt,
     return peak_phi, peak_S, samp_S, peak_k
 
 
+# ── Solver with custom waveform ──────────────────────────────────────────────
+
+@njit
+def simulate_pulses_waveform(n_pulses, n_discard, pts_period, dt,
+                              I_waveform,
+                              V, Gamma, v_g, a_gain, N_tr, eps,
+                              A, B, C_aug, tau_p, beta_sp, alpha_H, q_e,
+                              S_inj, seed):
+    """Same physics as simulate_pulses but with an arbitrary current waveform.
+
+    Parameters
+    ----------
+    I_waveform : 1-D array of length pts_period
+        Current (A) at each time step within one period.  Replayed
+        identically for every pulse.  Must be a contiguous float64 array.
+
+    All other parameters identical to simulate_pulses.
+    """
+    np.random.seed(seed)
+    sqrt_half_dt = np.sqrt(dt / 2.0)
+
+    n_out = n_pulses - n_discard
+    peak_phi = np.empty(n_out)
+    peak_S = np.empty(n_out)
+    samp_S = np.empty(n_out)
+    peak_k = np.empty(n_out, dtype=np.int64)
+
+    N = N_tr * 1.2
+    Er = np.sqrt(1e10)
+    Ei = 0.0
+
+    R_SLD = S_inj / tau_p
+    amp_sld = np.sqrt(R_SLD) * sqrt_half_dt if R_SLD > 0.0 else 0.0
+
+    half_pts = pts_period // 2
+
+    for p in range(n_pulses):
+        best_S = 0.0
+        best_phi = 0.0
+        best_k = 0
+        samp = 0.0
+        sampled = False
+
+        for k in range(pts_period):
+            I_cur = I_waveform[k]
+
+            S = Er * Er + Ei * Ei
+            if S < 1e-10:
+                S = 1e-10
+
+            g = a_gain * (N - N_tr) / (1.0 + eps * S)
+            R_sp = A * N + B * N * N + C_aug * N * N * N
+            R_sp_mode = beta_sp * B * N * N
+
+            gamma = 0.5 * (Gamma * v_g * g - 1.0 / tau_p)
+
+            Er_new = (1.0 + gamma * dt) * Er - gamma * alpha_H * dt * Ei
+            Ei_new = (1.0 + gamma * dt) * Ei + gamma * alpha_H * dt * Er
+            Er = Er_new
+            Ei = Ei_new
+
+            amp_sp = np.sqrt(R_sp_mode) * sqrt_half_dt
+            Er += amp_sp * np.random.randn()
+            Ei += amp_sp * np.random.randn()
+
+            if amp_sld > 0.0:
+                Er += amp_sld * np.random.randn()
+                Ei += amp_sld * np.random.randn()
+
+            dN = (I_cur / (q_e * V) - R_sp - Gamma * v_g * g * S) * dt
+            FN = np.sqrt(2.0 * R_sp * dt) * np.random.randn()
+            N += dN + FN
+
+            S_now = Er * Er + Ei * Ei
+            if S_now > best_S:
+                best_S = S_now
+                best_phi = np.arctan2(Ei, Er)
+                best_k = k
+
+            if not sampled and k >= half_pts:
+                samp = S_now
+                sampled = True
+
+        if p >= n_discard:
+            idx = p - n_discard
+            peak_phi[idx] = best_phi
+            peak_S[idx] = best_S
+            samp_S[idx] = samp
+            peak_k[idx] = best_k
+
+    return peak_phi, peak_S, samp_S, peak_k
+
+
+# ── Waveform builders ────────────────────────────────────────────────────────
+
+def build_raised_cosine(pts_period, dt, I_off, I_on, t_on, t_rise):
+    """Original raised-cosine waveform (default)."""
+    waveform = np.full(pts_period, I_off)
+    for k in range(pts_period):
+        t = k * dt
+        if t < t_rise:
+            f = 0.5 * (1.0 - np.cos(np.pi * t / t_rise))
+            waveform[k] = I_off + (I_on - I_off) * f
+        elif t < t_on - t_rise:
+            waveform[k] = I_on
+        elif t < t_on:
+            f = 0.5 * (1.0 - np.cos(np.pi * (t_on - t) / t_rise))
+            waveform[k] = I_off + (I_on - I_off) * f
+    return waveform
+
+
+def build_square(pts_period, dt, I_off, I_on, t_on):
+    """Ideal square pulse (zero rise time)."""
+    waveform = np.full(pts_period, I_off)
+    for k in range(pts_period):
+        if k * dt < t_on:
+            waveform[k] = I_on
+    return waveform
+
+
+def build_gaussian(pts_period, dt, I_off, I_on, t_center, sigma):
+    """Gaussian current pulse."""
+    waveform = np.full(pts_period, I_off)
+    for k in range(pts_period):
+        t = k * dt
+        waveform[k] = I_off + (I_on - I_off) * np.exp(
+            -0.5 * ((t - t_center) / sigma)**2)
+    return waveform
+
+
+def build_fourier(pts_period, dt, I_off, I_on, t_on, coeffs):
+    """Fourier-parameterised waveform.
+
+    coeffs : array of shape (n_harmonics, 2)
+        coeffs[h] = (a_h, b_h) for harmonics h=1,2,...
+        The waveform is:
+            I(t) = I_off + (I_on - I_off) * rect(t/t_on) * envelope(t)
+        where:
+            envelope(t) = clip[0.5 + sum_h a_h*cos(2*pi*h*t/t_on)
+                                      + b_h*sin(2*pi*h*t/t_on), 0, 1]
+
+    This allows smooth shaping of the "on" portion while keeping
+    the off-state clean.
+    """
+    T_rep = pts_period * dt
+    waveform = np.full(pts_period, I_off)
+    for k in range(pts_period):
+        t = k * dt
+        if t < t_on:
+            env = 0.5
+            for h in range(len(coeffs)):
+                freq_h = 2.0 * np.pi * (h + 1) * t / t_on
+                env += coeffs[h, 0] * np.cos(freq_h)
+                env += coeffs[h, 1] * np.sin(freq_h)
+            env = max(0.0, min(1.0, env))
+            waveform[k] = I_off + (I_on - I_off) * env
+    return waveform
+
+
+def build_trapezoid(pts_period, dt, I_off, I_on, t_on, t_rise, t_fall):
+    """Trapezoid with independent rise and fall times."""
+    waveform = np.full(pts_period, I_off)
+    for k in range(pts_period):
+        t = k * dt
+        if t < t_rise:
+            waveform[k] = I_off + (I_on - I_off) * (t / t_rise)
+        elif t < t_on - t_fall:
+            waveform[k] = I_on
+        elif t < t_on:
+            waveform[k] = I_off + (I_on - I_off) * ((t_on - t) / t_fall)
+    return waveform
+
+
 # ── Analysis helpers ─────────────────────────────────────────────────────────
 
 def phase_autocorrelation(phi, max_lag=200):

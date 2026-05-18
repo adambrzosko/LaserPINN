@@ -355,7 +355,7 @@ if __name__ == '__main__':
     laser = DFBLaserParams()
     I_th = laser.threshold_current()
 
-    DT = 0.5e-12
+    DT = 1.0e-12
     DUTY = 0.30
     I_BIAS_FACTOR = 0.9
     I_PEAK_FACTOR = 5.0
@@ -434,7 +434,7 @@ if __name__ == '__main__':
 
     # ── Part 2: Statistical analysis (many pulses) ────────────────────
 
-    N_PULSES_STAT = 100_000
+    N_PULSES_STAT = 50_000
     N_DISCARD_STAT = 100
 
     print(f"\n  Part 2: Statistical analysis ({N_PULSES_STAT//1000}k pulses)")
