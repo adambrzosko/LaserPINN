@@ -1,2 +1,22 @@
+# Images (output figures)
+images/
 *.png
-*.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Reports / large outputs
+*.pdf
+chat_log.md
+
+# Archives
+archive/
