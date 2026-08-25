@@ -9,7 +9,9 @@ dispersion penalty.
 
 Physics:
   Split-step Fourier method (SSFM) solving the nonlinear Schrodinger
-  equation in the slowly-varying envelope approximation:
+  equation in the slowly-varying envelope approximation, via
+  fiber.propagator.FiberPropagator (Kerr-only here; f_R=0 on the
+  chosen material recovers the plain NLSE used by this study):
 
     dA/dz = -alpha/2*A - j*(beta2/2)*d2A/dt2 + (beta3/6)*d3A/dt3
             + j*gamma*|A|^2*A
@@ -33,19 +35,20 @@ from numba import njit
 from core.dfb_laser import DFBLaserParams, q, h, c
 from gsdfb.plotting import setup_plotting, save_fig
 
+from fiber.fiber_params import make_fiber
+from fiber.propagator import FiberPropagator
+from fiber.sources import intracavity_to_field, extract_pulse, zero_pad
+from fiber.analysis import pulse_metrics
+
 
 # ── Fiber parameters (SMF-28 at 1550 nm) ─────────────────────────────
+# f_R=0 on the material disables the delayed Raman response, recovering
+# the plain Kerr NLSE this dispersion-penalty study originally used; see
+# studies/raman_fiber_study.py for the full GNLSE with Raman scattering.
 
-ALPHA_DB = 0.2          # attenuation (dB/km)
-ALPHA = ALPHA_DB / (10 * np.log10(np.e)) / 1e3   # (1/m)  ~ 4.6e-5
-D_PS = 17.0             # dispersion (ps/nm/km)
-LAMBDA0 = 1550e-9       # center wavelength (m)
-# beta2 from D:  beta2 = -D * lambda^2 / (2*pi*c)
-BETA2 = -D_PS * 1e-6 * LAMBDA0**2 / (2 * np.pi * c)  # s^2/m
-BETA3 = 0.07e-39        # third-order dispersion (s^3/m)  ~0.07 ps^3/km
-GAMMA_NL = 1.3e-3       # nonlinear coefficient (1/W/m)
-N_EFF = 1.468           # effective index (for Aeff ~ 80 um^2)
-A_EFF = 80e-12          # effective mode area (m^2)
+FIBER = make_fiber('smf28', material_overrides=dict(f_R=0.0))
+D_PS = FIBER.D
+ALPHA_DB = FIBER.alpha_dB_km
 
 
 # ── Numba solver: full waveform output ────────────────────────────────
@@ -132,152 +135,6 @@ def simulate_pulse_waveform(
     return Er_out, Ei_out, N_out
 
 
-# ── Intracavity → output field conversion ─────────────────────────────
-
-def intracavity_to_output(Er, Ei, laser):
-    """Convert intracavity photon density field to output power envelope.
-
-    The intracavity field has units ~ sqrt(photon density).
-    Output power:  P = eta_i * frac_front * h*nu * V * S / tau_p
-
-    We want A(t) with |A|^2 in Watts, so:
-        A = sqrt(P) * exp(j*phi)
-        P = eta_i * frac_front * h*nu * V * (Er^2+Ei^2) / tau_p
-
-    Preserve the phase structure: just scale the complex field.
-    """
-    eta_i = 0.8
-    frac_front = (1 - laser.R1) / ((1 - laser.R1) + (1 - laser.R2))
-    scale = np.sqrt(eta_i * frac_front * h * laser.nu0 * laser.V / laser.tau_p)
-
-    A_r = scale * Er
-    A_i = scale * Ei
-    return A_r + 1j * A_i
-
-
-# ── Split-step Fourier method ─────────────────────────────────────────
-
-def ssfm_propagate(A, dt, L_fiber, beta2, beta3=0.0, gamma=0.0,
-                   alpha=0.0, n_steps=None, step_size=100.0):
-    """Propagate envelope A(t) through fiber using symmetric SSFM.
-
-    Parameters
-    ----------
-    A : complex array — input field envelope, |A|^2 in Watts
-    dt : float — time step (s)
-    L_fiber : float — fiber length (m)
-    beta2 : float — GVD (s^2/m)
-    beta3 : float — TOD (s^3/m)
-    gamma : float — nonlinear coefficient (1/W/m)
-    alpha : float — loss coefficient (1/m)
-    n_steps : int — number of spatial steps (overrides step_size)
-    step_size : float — spatial step size (m), default 100 m
-
-    Returns
-    -------
-    A_out : complex array — output field after propagation
-    """
-    N = len(A)
-    if n_steps is None:
-        n_steps = max(int(np.ceil(L_fiber / step_size)), 1)
-    dz = L_fiber / n_steps
-
-    # Frequency grid
-    omega = 2 * np.pi * np.fft.fftfreq(N, d=dt)
-
-    # Linear operator in frequency domain (half-step)
-    D_half = np.exp((-alpha / 2 + 1j * beta2 / 2 * omega**2
-                     - 1j * beta3 / 6 * omega**3) * dz / 2)
-
-    A_f = np.fft.fft(A)
-
-    for step in range(n_steps):
-        # Half linear step
-        A_f *= D_half
-        A_t = np.fft.ifft(A_f)
-
-        # Full nonlinear step
-        if gamma > 0:
-            A_t *= np.exp(1j * gamma * np.abs(A_t)**2 * dz)
-
-        # Half linear step
-        A_f = np.fft.fft(A_t) * D_half
-
-    A_out = np.fft.ifft(A_f)
-    return A_out
-
-
-# ── Pulse metrics ─────────────────────────────────────────────────────
-
-def pulse_metrics(A, dt, t_center=None, window_fraction=0.8):
-    """Extract metrics from a single pulse envelope.
-
-    Returns dict with: peak_power, fwhm, rms_width, energy,
-    chirp_bandwidth, spectral_width_3dB, time_bandwidth_product.
-    """
-    P = np.abs(A)**2
-    peak_power = float(np.max(P))
-    peak_idx = int(np.argmax(P))
-
-    # Energy
-    energy = float(np.sum(P) * dt)
-
-    # FWHM (temporal)
-    half_max = peak_power / 2.0
-    above = np.where(P >= half_max)[0]
-    if len(above) > 1:
-        fwhm = float((above[-1] - above[0]) * dt)
-    else:
-        fwhm = dt
-
-    # RMS width
-    t_arr = np.arange(len(A)) * dt
-    t_mean = np.sum(t_arr * P) / np.sum(P) if np.sum(P) > 0 else 0
-    rms_width = float(np.sqrt(np.sum((t_arr - t_mean)**2 * P) / np.sum(P)))
-
-    # Spectral width
-    A_f = np.fft.fftshift(np.fft.fft(A))
-    S_f = np.abs(A_f)**2
-    f_arr = np.fft.fftshift(np.fft.fftfreq(len(A), d=dt))
-
-    S_f_max = np.max(S_f)
-    above_f = np.where(S_f >= S_f_max / 2.0)[0]
-    if len(above_f) > 1:
-        spec_width_3dB = float(abs(f_arr[above_f[-1]] - f_arr[above_f[0]]))
-    else:
-        spec_width_3dB = 1.0 / dt
-
-    # RMS spectral width
-    f_mean = np.sum(f_arr * S_f) / np.sum(S_f) if np.sum(S_f) > 0 else 0
-    rms_spec = float(np.sqrt(np.sum((f_arr - f_mean)**2 * S_f) / np.sum(S_f)))
-
-    # Time-bandwidth product
-    tbp = rms_width * rms_spec * 2 * np.pi  # dimensionless
-
-    # Instantaneous frequency (chirp) at peak
-    phase = np.unwrap(np.angle(A))
-    inst_freq = np.gradient(phase, dt) / (2 * np.pi)
-    chirp_at_peak = float(inst_freq[peak_idx])
-
-    return dict(
-        peak_power=peak_power,
-        fwhm=fwhm,
-        rms_width=rms_width,
-        energy=energy,
-        spec_width_3dB=spec_width_3dB,
-        rms_spec=rms_spec,
-        tbp=tbp,
-        chirp_at_peak=chirp_at_peak,
-    )
-
-
-def extract_single_pulse(A, dt, pts_period, pulse_idx):
-    """Extract a single pulse from a multi-pulse waveform."""
-    start = pulse_idx * pts_period
-    end = (pulse_idx + 1) * pts_period
-    return A[start:end]
-
-
 # ── Main ──────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -306,17 +163,14 @@ if __name__ == '__main__':
     freqs = [2e9, 5e9, 10e9]
     fiber_lengths_km = [0, 5, 10, 20, 50]
 
-    # Fiber params
-    beta2 = BETA2
-    beta3 = BETA3
-    gamma_nl = GAMMA_NL
-    alpha_fiber = ALPHA
+    # Fiber propagator (Kerr-only; f_R=0 was set on FIBER's material above)
+    fiber_prop = FiberPropagator(FIBER)
 
     print(f"\n  Laser: lambda = {laser.lambda0*1e9:.0f} nm, "
           f"alpha_H = {laser.alpha_H}, tau_p = {laser.tau_p*1e12:.2f} ps")
     print(f"  Fiber: D = {D_PS:.1f} ps/nm/km, "
-          f"beta2 = {beta2*1e27:.3f} ps^2/km, "
-          f"gamma = {gamma_nl*1e3:.1f} /W/km, "
+          f"beta2 = {FIBER.beta2*1e27:.3f} ps^2/km, "
+          f"gamma = {FIBER.gamma*1e3:.1f} /W/km, "
           f"alpha = {ALPHA_DB:.1f} dB/km")
     print(f"  Bias = {I_BIAS_FACTOR}x I_th, Peak = {I_PEAK_FACTOR}x I_th, "
           f"Duty = {DUTY*100:.0f}%")
@@ -369,18 +223,13 @@ if __name__ == '__main__':
             print(f"    Generated in {elapsed:.2f}s")
 
             # Convert to output field
-            A_full = intracavity_to_output(Er, Ei, laser)
+            A_full = intracavity_to_field(Er, Ei, laser)
 
             # Extract representative pulse
-            A_pulse = extract_single_pulse(A_full, dt, pts, PULSE_IDX)
+            A_pulse = extract_pulse(A_full, pts, PULSE_IDX)
 
             # Zero-pad for spectral resolution
-            pad_factor = 4
-            n_padded = len(A_pulse) * pad_factor
-            A_padded = np.zeros(n_padded, dtype=complex)
-            # Center the pulse in the padded window
-            offset = (n_padded - len(A_pulse)) // 2
-            A_padded[offset:offset + len(A_pulse)] = A_pulse
+            A_padded = zero_pad(A_pulse, pad_factor=4)
 
             # Propagate through different fiber lengths
             key_base = f'{fg:.0f}GHz_{mode}'
@@ -393,9 +242,7 @@ if __name__ == '__main__':
                 else:
                     # Step size: max 50 m or L/100
                     step = min(50.0, L_m / 100)
-                    A_out = ssfm_propagate(
-                        A_padded, dt, L_m, beta2, beta3,
-                        gamma_nl, alpha_fiber, step_size=step)
+                    A_out = fiber_prop.propagate(A_padded, dt, L_m, step_size=step)
 
                 m = pulse_metrics(A_out, dt)
                 results[key_base][L_km] = dict(

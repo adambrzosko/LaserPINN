@@ -26,6 +26,93 @@ million_pulse_comparison.py   High-throughput stochastic solver (Numba JIT) + wa
 
 All analysis scripts import from these core modules.
 
+`fiber/` is a separate, independent package for nonlinear fiber propagation, built to consume the complex field output of `core.dfb_laser` / `core.million_pulse_comparison` / `core.sld_injection`:
+
+```
+fiber/materials.py       FiberMaterial dataclass + make_material(); Raman response (Blow-Wood damped-
+                          oscillator model), phonon occupation (Bose-Einstein)
+fiber/geometry.py        FiberGeometry dataclass + make_geometry(); sets A_eff (drives gamma)
+fiber/fiber_params.py    FiberParams dataclass + make_fiber('smf28'|'dcf'|'hnlf'|
+                          'pcf_supercontinuum'|'chalcogenide_waveguide') factory; combines
+                          material+geometry+published D/alpha/beta3 into derived alpha/beta2/gamma
+fiber/raman_response.py  Analytic frequency-domain Raman response H_R(Omega); classical stimulated-
+                          Raman gain spectrum g_R(Omega)
+fiber/propagator.py      FiberPropagator: symmetric split-step GNLSE solver (dispersion + Kerr SPM +
+                          full time-domain Raman response); f_R=0 recovers the plain-Kerr NLSE
+fiber/quantum_noise.py   QuantumRamanPropagator(FiberPropagator): adds spontaneous-Raman Langevin
+                          noise per step, strength set by Bose-Einstein phonon occupation
+                          (fluctuation-dissipation) -- semiclassical quantum noise on top of the
+                          classical field; ensemble_propagate() for multi-realization noise stats
+fiber/sources.py          intracavity_to_field(), extract_pulse(), zero_pad() -- adapters from
+                          core.dfb_laser-style intracavity fields to a fiber launch field
+fiber/analysis.py         pulse_metrics(), spectral_centroid() (tracks soliton self-frequency
+                          shift), band_power()
+fiber/multimode_fiber.py  MultimodeFiberGeometry + MultimodeFiberParams dataclasses +
+                          make_multimode_fiber('om1'..'om5') factory; reduced-order principal-
+                          mode-group model (not full per-LP-mode) -- intermodal (DMD) group delay
+                          per mode group via a calibrated graded-index alpha-profile formula, plus
+                          a spatial-overlap-decay model for intermodal Kerr/Raman coupling strength.
+                          alpha, beta2, and beta3 are ALL per-mode arrays, not scalars: alpha carries
+                          differential mode attenuation (power-law growth with mode index, calibrated
+                          per OM grade); beta2/beta3 carry a mode-dependent waveguide-dispersion
+                          correction derived by finite-differencing the SAME delay-vs-frequency
+                          formula used for DMD (beta2=d(beta1)/d(omega), beta3=d^2(beta1)/d(omega^2))
+                          rather than new hand-tuned constants. Every per-mode quantity is referenced
+                          to mode 0, so a single-mode-only launch reproduces FiberPropagator exactly.
+                          Also derives delta_beta0 (M,): each mode group's ABSOLUTE propagation-
+                          constant offset (rad/m), via the same leading-order WKB alpha-profile
+                          relation as beta1 -- since beta1 IS beta0's frequency derivative by
+                          definition, this is beta0's closed-form antiderivative, not a new model
+                          (verified in tests/test_multimode_fiber.py: differentiating it numerically
+                          reproduces beta1's leading term). Needed to correctly interfere/combine two
+                          mode groups (e.g. a phase-encoded signal in one mode with a reference field
+                          in another) -- delta_beta1 alone only governs each mode's own envelope.
+fiber/multimode_propagator.py  MultimodeFiberPropagator: symmetric split-step solver for coupled
+                          mode-group envelopes -- per-mode loss, GVD, TOD, and intermodal walk-off
+                          (DMD) (reduces exactly to FiberPropagator when only one mode group is
+                          populated), intramodal Kerr+Raman, intermodal Kerr XPM + intermodal
+                          Raman coupling between mode groups, and (applied once, in closed form, to
+                          the final output) each mode's absolute delta_beta0*L phase
+fiber/wdm_propagator.py  WDMPropagator: symmetric split-step solver for N co-propagating WDM
+                          channels sharing one spatial mode -- per-channel walk-off from chromatic
+                          dispersion, intra-channel SPM+Raman (reduces exactly to FiberPropagator
+                          for 1 channel), instantaneous-Kerr cross-phase modulation (XPM, factor
+                          2 vs SPM) between channels, and inter-channel Raman scattering ("Raman
+                          crosstalk"/"Raman tilt") using the Raman gain spectrum evaluated at each
+                          channel PAIR's fixed carrier separation -- a real power gain/loss term
+                          that (unlike XPM or the multimode intermodal-Raman term) works even for
+                          unmodulated/CW channels. Also derives delta_beta0 (N,): each channel's
+                          ABSOLUTE propagation-constant offset, via fiber.beta1_ref (=material.n_g/c,
+                          a new explicit absolute-index parameter -- everything else in this codebase
+                          only ever needed relative dispersion) plus the exact antiderivative of
+                          delta_beta1; applied once, in closed form, to the final propagated output.
+                          Needed for phase-encoded protocols where the channel of interest will be
+                          coherently interfered with something on a different wavelength (e.g. a
+                          local oscillator, or a twin/reference pulse) -- not needed if co-propagating
+                          channels only ever interact through the power-domain mechanisms above (XPM,
+                          Raman crosstalk) and are never combined interferometrically.
+fiber/brillouin.py       Stimulated Brillouin scattering (SBS): FiberMaterial gained g_B/nu_B/
+                          delta_nu_B fields + brillouin_gain() Lorentzian spectrum; BrillouinPropagator
+                          solves the steady-state coupled forward-pump/backward-Stokes power
+                          equations as a two-point boundary value problem (shooting method), seeded
+                          by a spontaneous-scattering noise floor; sbs_threshold_power() gives the
+                          standard analytic (Smith 1972) threshold formula. A distinct mechanism
+                          from Raman (acoustic vs optical phonons): ~10 GHz shift and ~tens-of-MHz
+                          linewidth (vs ~13 THz / ~THz for Raman), predominantly backward-
+                          scattering, with a far lower CW threshold power -- modelled as a
+                          standalone steady-state power problem rather than on the fs-ps time grid
+                          the other propagators use, since resolving the linewidth directly would
+                          need a >30 ns simulation window
+```
+
+Validated in `tests/test_fiber_engine.py` against four independent physics checks: GVD-only Gaussian broadening vs the analytic formula, fundamental-soliton shape recurrence after one soliton period, Raman-induced soliton self-frequency shift (redshift), and spontaneous-Raman noise correctly vanishing on the anti-Stokes side as T->0. See `studies/raman_fiber_study.py` for a worked example (SSFS across fiber types; Stokes/anti-Stokes noise vs temperature).
+
+`tests/test_multimode_fiber.py` validates the OM1-OM5 multimode support: monotonic OM1->OM5 bandwidth ordering matching nominal datasheet EMB/OFL figures, exact reduction to `FiberPropagator` when only one mode group is populated, OM1 broadening a multi-mode-launched pulse more than OM4 under pure intermodal dispersion (DMD), a broadband pump pulse in one mode group producing a measurable, Raman-specific (vanishing when decoupled) red-shifting pull on a probe pulse in a different mode group, per-mode loss (OM1 showing more differential mode attenuation than OM4, with the propagated power difference between mode 0 and the highest mode group matching the per-mode alpha difference to <0.05 dB), per-mode beta2/beta3 (nonzero spread across mode groups, with identical pulses launched into different mode groups broadening by measurably different amounts under pure GVD), and absolute inter-mode phase beta0 (an analytic self-consistency check -- differentiating delta_beta0 numerically reproduces delta_beta1's leading term to 1%-- plus an end-to-end propagation where the phase actually imprinted on a mode group's output matches the closed-form delta_beta0*L prediction to ~1e-10 rad). Note: intermodal coupling here only transfers *time-varying* power between mode groups -- a perfectly CW pump cannot seed frequency-selective gain in another mode group the way a same-mode two-tone pump/probe does in `FiberPropagator` (see the caveat in `fiber/multimode_propagator.py`'s docstring).
+
+`tests/test_wdm_propagator.py` validates SPM/XPM/Raman-crosstalk/beta0: exact reduction to `FiberPropagator` for 1 channel; a weak co-propagating probe channel picks up exactly `gamma*2*P_pump*L` of XPM-induced phase (the standard XPM/SPM factor of 2) to within 0.3%; two CW-like channels ~13.2 THz apart show a genuine, sign-correct, resonance-selective Raman power transfer (which vanishes for closely-spaced channels or with Raman disabled) -- specifically demonstrating that unlike the multimode intermodal-Raman term, this one *does* work for unmodulated/CW channels, since it uses the fixed channel separation rather than a co-located baseband convolution; and absolute inter-channel phase beta0 (delta_beta0's derivative reproduces `beta1_ref + delta_beta1` to 1e-13 relative error -- these are exact closed-form polynomials here, not an approximation -- plus an end-to-end propagation matching the closed-form delta_beta0*L prediction exactly).
+
+`tests/test_brillouin.py` validates the SBS solver against the textbook threshold picture: negligible SBS-specific pump depletion well below the analytic threshold, ~10% depletion right at threshold rising to >65% well above it (with reflectivity climbing from ~1e-8 to ~0.65 in between), reflectivity collapsing by 9 orders of magnitude when detuned 10 linewidths off resonance, and exact conservation (to 1e-15) of the net one-way photon flux `P_pump(z)-P_stokes(z)` for a lossless fiber. Two real bugs were caught and fixed while building this: a missing `1/A_eff` factor converting the standard tabulated (intensity-based) `g_B` into the power-based coupled equations, and a sign-convention mismatch feeding WDM channel separations into `raman_gain_spectrum` (whose `Omega` argument follows `physical_freq = omega0 - Omega`, opposite to the direct channel-offset convention).
+
 ---
 
 ## Scripts and Their Purposes
@@ -45,7 +132,10 @@ All analysis scripts import from these core modules.
 | 1 | `multimode_analysis.py` | Multi-longitudinal-mode competition (5 modes) with shared carrier reservoir; mode partition noise, SMSR, k-factor | `images/multimode/` |
 | 3 | `waveform_optimisation.py` | Differential evolution optimisation of modulation waveform for user-selected objectives (jitter, phase randomness, power, balanced) | `images/waveform_opt/` |
 | 5 | `carrier_transport_analysis.py` | Carrier transport effects (SCH capture time tau_cap) on gain-switching dynamics; sweep over capture times | `images/carrier_transport/` |
-| 6 | `fiber_propagation.py` | Split-step Fourier propagation through SMF-28; chirp compensation in anomalous dispersion; SLD impact on fiber effects | `images/fiber_propagation/` |
+| 6 | `fiber_propagation.py` | Split-step Fourier propagation through SMF-28; chirp compensation in anomalous dispersion; SLD impact on fiber effects (uses `fiber.propagator.FiberPropagator`, Kerr-only) | `images/fiber_propagation/` |
+| - | `raman_fiber_study.py` | Nonlinear fiber Raman scattering via `fiber/`: classical soliton self-frequency shift across SMF-28/HNLF/PCF, and quantum spontaneous-Raman noise (Stokes/anti-Stokes asymmetry) vs temperature | `images/raman_fiber/` |
+| - | `multimode_fiber_study.py` | Multimode (OM1-OM5) fiber via `fiber/multimode_*`: intermodal dispersion (DMD) broadening ordering across OM1-OM5, and intermodal Raman scattering (pump pulse in one mode group cross-Raman-shifting a probe pulse in another) | `images/multimode_fiber/` |
+| - | `wdm_brillouin_study.py` | WDM effects via `fiber/wdm_propagator.py`: XPM-induced chirp on a probe channel, Raman tilt across a 9-channel comb; stimulated Brillouin scattering via `fiber/brillouin.py`: the classic reflectivity/transmission threshold knee vs input power | `images/wdm_brillouin/` |
 
 ### PINN / Machine Learning Studies (Recommendations #7-12)
 
@@ -122,6 +212,9 @@ python3 -m core.million_pulse_comparison     # 1M-pulse phase correlation, 1-10 
 ```bash
 python3 -m studies.multimode_analysis        # Multi-mode competition (5 modes)
 python3 -m studies.fiber_propagation         # SSFM fiber propagation
+python3 -m studies.raman_fiber_study         # Raman SSFS + quantum noise vs temperature
+python3 -m studies.multimode_fiber_study     # OM1-OM5 intermodal dispersion + Raman
+python3 -m studies.wdm_brillouin_study       # WDM XPM/Raman crosstalk + SBS threshold
 python3 -m studies.carrier_transport_analysis # Carrier transport effects
 
 # Waveform optimisation (CLI with options)
