@@ -79,6 +79,13 @@ class MultimodeFiberPropagator:
         self.fiber = fiber
         self.include_raman = include_raman
 
+    def _linear_coupling_step(self, A_t, dz):
+        """Hook for subclasses to apply a per-step LINEAR mode-mixing
+        operator (e.g. random coupling from bends/splices -- a mechanism
+        distinct from the nonlinear coupling above). No-op here -- see
+        fiber.mode_coupling.RandomModeCouplingPropagator."""
+        return A_t
+
     def propagate(self, A0, dt, L, step_size=20.0, n_steps=None):
         """Propagate mode-group fields through fiber length L (m).
 
@@ -148,6 +155,7 @@ class MultimodeFiberPropagator:
 
             phase = gamma_diag * P_self + gamma_off @ cross_source
             A_t = A_t * np.exp(1j * phase * dz)
+            A_t = self._linear_coupling_step(A_t, dz)
 
             A_f = np.fft.fft(A_t, axis=1) * D_half
 

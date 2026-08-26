@@ -124,6 +124,17 @@ class WDMPropagator:
         np.fill_diagonal(g_R_matrix, 0.0)
         self.g_R_matrix = g_R_matrix if include_raman else np.zeros_like(g_R_matrix)
 
+    def _prepare(self, Omega, dt):
+        """Hook for subclasses to precompute per-frequency/per-channel arrays
+        before the step loop starts. No-op in the base (purely classical)
+        propagator -- see fiber.quantum_wdm.QuantumWDMPropagator."""
+        pass
+
+    def _noise_step(self, A_t, P, dz, dt, n_pts):
+        """Hook returning a (N, n_pts) noise increment added after the
+        nonlinear step each iteration. Zero in the base propagator."""
+        return 0.0
+
     def propagate(self, A0, dt, L, step_size=50.0, n_steps=None):
         """Propagate channel fields through fiber length L (m).
 
@@ -165,6 +176,7 @@ class WDMPropagator:
         )  # (N, n_pts)
 
         gamma = self.fiber.gamma
+        self._prepare(Omega, dt)
         A_f = np.fft.fft(A, axis=1)
 
         for _ in range(n_steps):
@@ -186,6 +198,7 @@ class WDMPropagator:
             raman_crosstalk = 0.5 * (self.g_R_matrix @ P)      # real (gain/loss) part
 
             A_t = A_t * np.exp((1j * kerr_phase + raman_crosstalk) * dz)
+            A_t = A_t + self._noise_step(A_t, P, dz, dt, n_pts)
 
             A_f = np.fft.fft(A_t, axis=1) * D_half
 
