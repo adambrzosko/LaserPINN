@@ -13,12 +13,14 @@ core.dfb_laser / core.million_pulse_comparison / core.sld_injection.
     from fiber.multimode_fiber import MultimodeFiberGeometry, MultimodeFiberParams, make_multimode_fiber
     from fiber.multimode_propagator import MultimodeFiberPropagator
     from fiber.mode_coupling import RandomModeCouplingPropagator
+    from fiber.quantum_multimode import QuantumMultimodePropagator, ensemble_propagate_multimode
     from fiber.wdm_propagator import WDMPropagator
     from fiber.quantum_wdm import QuantumWDMPropagator, ensemble_propagate_wdm
     from fiber.four_wave_mixing import fwm_efficiency, fwm_power, fwm_ghost_tone_power
     from fiber.polarization import PolarizationPropagator
     from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneous_brillouin_noise_power
     from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
+    from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
 
 Quick start
 -----------
@@ -52,6 +54,14 @@ nonlinear coupling above):
 
     rc_prop = RandomModeCouplingPropagator(om4, kappa=0.05, seed=0)
     A_out = rc_prop.propagate(A0, dt, L=200)
+
+For the spontaneous-Raman noise floor a bright signal in one mode group
+imposes on itself and on other (possibly empty) mode groups:
+
+    from fiber.quantum_multimode import QuantumMultimodePropagator
+
+    qmm_prop = QuantumMultimodePropagator(om4, seed=0)
+    A_out = qmm_prop.propagate(A0, dt, L=200)
 
 For multiple co-propagating WDM channels sharing one spatial mode, with
 self-phase modulation, cross-phase modulation, and inter-channel Raman
@@ -104,6 +114,19 @@ from SBS -- the physics behind OTDR):
     from fiber.rayleigh_backscatter import rayleigh_backscatter_power
 
     P_back = rayleigh_backscatter_power(smf, P_in=0.001, L=20e3)
+
+For a bright classical channel and a weak signal separated by BOTH
+spatial mode AND DWDM wavelength at once (e.g. a bright reference in one
+mode group on one channel, phase-encoded QKD in another mode group on
+another channel):
+
+    from fiber.multimode_fiber import make_multimode_fiber
+    from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
+
+    om3 = make_multimode_fiber('om3', lambda0=1552.524e-9)
+    hybrid = HybridCrosstalkPropagator(om3, qkd_mode=0, bright_mode=1,
+                                        channel_separation_Hz=200e9, noise=True, seed=0)
+    A_qkd_out, A_bright_out = hybrid.propagate(A_qkd_0, A_bright_0, dt, L=10e3)
 """
 from fiber.materials import FiberMaterial, make_material
 from fiber.geometry import FiberGeometry, make_geometry
@@ -115,9 +138,11 @@ from fiber.analysis import pulse_metrics, spectral_centroid, band_power
 from fiber.multimode_fiber import MultimodeFiberGeometry, MultimodeFiberParams, make_multimode_fiber
 from fiber.multimode_propagator import MultimodeFiberPropagator
 from fiber.mode_coupling import RandomModeCouplingPropagator
+from fiber.quantum_multimode import QuantumMultimodePropagator, ensemble_propagate_multimode
 from fiber.wdm_propagator import WDMPropagator
 from fiber.quantum_wdm import QuantumWDMPropagator, ensemble_propagate_wdm
 from fiber.four_wave_mixing import fwm_efficiency, fwm_power, fwm_ghost_tone_power
 from fiber.polarization import PolarizationPropagator
 from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneous_brillouin_noise_power
 from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
+from fiber.hybrid_crosstalk import HybridCrosstalkPropagator

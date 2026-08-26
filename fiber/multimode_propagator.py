@@ -86,6 +86,17 @@ class MultimodeFiberPropagator:
         fiber.mode_coupling.RandomModeCouplingPropagator."""
         return A_t
 
+    def _prepare(self, Omega, dt):
+        """Hook for subclasses to precompute per-frequency/per-mode arrays
+        before the step loop starts. No-op in the base (purely classical)
+        propagator -- see fiber.quantum_multimode.QuantumMultimodePropagator."""
+        pass
+
+    def _noise_step(self, A_t, P, dz, dt, n_pts):
+        """Hook returning a (M, n_pts) noise increment added after the
+        nonlinear step each iteration. Zero in the base propagator."""
+        return 0.0
+
     def propagate(self, A0, dt, L, step_size=20.0, n_steps=None):
         """Propagate mode-group fields through fiber length L (m).
 
@@ -138,6 +149,7 @@ class MultimodeFiberPropagator:
         gamma_diag = np.diag(self.fiber.gamma_matrix)[:, None]      # (M, 1)
         gamma_off = self.fiber.gamma_matrix - np.diag(np.diag(self.fiber.gamma_matrix))  # (M, M)
 
+        self._prepare(Omega, dt)
         A_f = np.fft.fft(A, axis=1)
 
         for _ in range(n_steps):
@@ -155,6 +167,7 @@ class MultimodeFiberPropagator:
 
             phase = gamma_diag * P_self + gamma_off @ cross_source
             A_t = A_t * np.exp(1j * phase * dz)
+            A_t = A_t + self._noise_step(A_t, P, dz, dt, n_pts)
             A_t = self._linear_coupling_step(A_t, dz)
 
             A_f = np.fft.fft(A_t, axis=1) * D_half

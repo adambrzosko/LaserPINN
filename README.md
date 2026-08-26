@@ -84,6 +84,20 @@ fiber/mode_coupling.py   RandomModeCouplingPropagator(MultimodeFiberPropagator):
                           accumulated coupling grows as kappa*sqrt(L) (diffusive/random-walk
                           scaling, matching how strong mode coupling and PMD accumulation are
                           described in the SDM/multimode-fiber literature), not linearly with L.
+fiber/quantum_multimode.py  QuantumMultimodePropagator(MultimodeFiberPropagator): the multimode
+                          counterpart of quantum_noise.QuantumRamanPropagator/quantum_wdm.
+                          QuantumWDMPropagator -- adds spontaneous Raman noise, both intramodal
+                          (mode 0's formula verified to exactly match the single-mode case) and
+                          intermodal (weighted by the same gamma_matrix used for classical
+                          intermodal coupling). Key physical difference from the classical
+                          intermodal term: spontaneous noise here is driven by each mode's LOCAL
+                          PEAK power directly, so unlike the deterministic term (which needs
+                          genuine time-varying power and gives exactly zero for a CW driver -- see
+                          multimode_propagator.py's docstring), a quasi-CW signal in one mode group
+                          DOES seed measurable spontaneous noise in other, initially-empty mode
+                          groups, with locality (nearby >> distant) matching the overlap-decay
+                          weighting -- the mechanism relevant to a bright classical channel sharing
+                          a multimode fiber with a weak quantum channel in a different spatial mode.
 fiber/wdm_propagator.py  WDMPropagator: symmetric split-step solver for N co-propagating WDM
                           channels sharing one spatial mode -- per-channel walk-off from chromatic
                           dispersion, intra-channel SPM+Raman (reduces exactly to FiberPropagator
@@ -167,6 +181,30 @@ fiber/rayleigh_backscatter.py  Elastic Rayleigh backscattering: linear, non-stim
                           (saturation, double-pass attenuation, trace shape) are cross-checked
                           against brute-force numerical integration in
                           tests/test_rayleigh_backscatter.py.
+fiber/hybrid_crosstalk.py  HybridCrosstalkPropagator: the first propagator in fiber/ combining
+                          SPATIAL-mode diversity (like multimode_propagator.py) AND WAVELENGTH-
+                          channel diversity (like wdm_propagator.py) at once -- a bright classical
+                          reference in one mode group at one DWDM channel, one-way-coupled (its own
+                          back-action from a weak/QKD-level peer field is negligible) into a weak
+                          signal in a DIFFERENT mode group at a DIFFERENT channel. Combines two
+                          already-validated pieces multiplicatively rather than deriving new
+                          physics: the spatial part is MultimodeFiberParams.gamma_matrix[qkd,bright]
+                          (the same coefficient multimode_propagator.py uses for intermodal XPM);
+                          the spectral part is raman_gain_spectrum() evaluated at the fixed channel
+                          separation (the same mechanism wdm_propagator.py uses for inter-channel
+                          Raman crosstalk), called WITH gamma_matrix[qkd,bright] in place of a bare
+                          gamma so the spatial overlap carries through. XPM is Kerr-only
+                          (instantaneous, channel-separation-independent); deterministic Raman
+                          crosstalk and spontaneous-Raman noise both use the bright field's local
+                          instantaneous/peak power at the fixed spectral separation, matching
+                          wdm_propagator.py's convention (not multimode_propagator.py's co-located
+                          convolution, which assumes zero spectral offset). Also derives and applies
+                          the ABSOLUTE phase of the bright field relative to the (reference, offset-0)
+                          weak field -- combining MultimodeFiberParams.delta_beta0's intermodal term
+                          with WDMPropagator's delta_beta0 construction (beta1_ref=material.n_g/c) --
+                          the one piece of physics a pure power-domain (XPM/Raman) comparison cannot
+                          give, and the reason this module exists: a phase-encoded protocol's
+                          receiver measures exactly this relative phase.
 ```
 
 Validated in `tests/test_fiber_engine.py` against four independent physics checks: GVD-only Gaussian broadening vs the analytic formula, fundamental-soliton shape recurrence after one soliton period, Raman-induced soliton self-frequency shift (redshift), and spontaneous-Raman noise correctly vanishing on the anti-Stokes side as T->0. See `studies/raman_fiber_study.py` for a worked example (SSFS across fiber types; Stokes/anti-Stokes noise vs temperature).
@@ -174,6 +212,8 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 `tests/test_multimode_fiber.py` validates the OM1-OM5 multimode support: monotonic OM1->OM5 bandwidth ordering matching nominal datasheet EMB/OFL figures, exact reduction to `FiberPropagator` when only one mode group is populated, OM1 broadening a multi-mode-launched pulse more than OM4 under pure intermodal dispersion (DMD), a broadband pump pulse in one mode group producing a measurable, Raman-specific (vanishing when decoupled) red-shifting pull on a probe pulse in a different mode group, per-mode loss (OM1 showing more differential mode attenuation than OM4, with the propagated power difference between mode 0 and the highest mode group matching the per-mode alpha difference to <0.05 dB), per-mode beta2/beta3 (nonzero spread across mode groups, with identical pulses launched into different mode groups broadening by measurably different amounts under pure GVD), and absolute inter-mode phase beta0 (an analytic self-consistency check -- differentiating delta_beta0 numerically reproduces delta_beta1's leading term to 1%-- plus an end-to-end propagation where the phase actually imprinted on a mode group's output matches the closed-form delta_beta0*L prediction to ~1e-10 rad). Note: intermodal coupling here only transfers *time-varying* power between mode groups -- a perfectly CW pump cannot seed frequency-selective gain in another mode group the way a same-mode two-tone pump/probe does in `FiberPropagator` (see the caveat in `fiber/multimode_propagator.py`'s docstring).
 
 `tests/test_mode_coupling.py` validates `RandomModeCouplingPropagator`: exact power conservation across mode groups with no loss/nonlinearity (1e-15 relative error, expected since the coupling operator is exactly unitary by construction); `kappa=0` gives exactly zero coupling while `kappa>0` measurably couples power out of the launch mode; the coupled-away fraction grows monotonically with distance; and nearby mode groups pick up orders of magnitude more power than distant ones (locality from the overlap-decay weighting).
+
+`tests/test_quantum_multimode.py` validates `QuantumMultimodePropagator`: mode 0's intramodal noise formula exactly matches `QuantumRamanPropagator`'s single-mode case; a quasi-CW signal in mode 0 with nothing launched elsewhere still seeds measurable spontaneous noise in other, initially-empty mode groups (unlike the classical deterministic intermodal term, which gives exactly zero for a CW driver), with the expected locality (adjacent mode >> distant mode); and the same Stokes/anti-Stokes asymmetry at T~0 already validated for the single-mode and WDM cases.
 
 `tests/test_wdm_propagator.py` validates SPM/XPM/Raman-crosstalk/beta0: exact reduction to `FiberPropagator` for 1 channel; a weak co-propagating probe channel picks up exactly `gamma*2*P_pump*L` of XPM-induced phase (the standard XPM/SPM factor of 2) to within 0.3%; two CW-like channels ~13.2 THz apart show a genuine, sign-correct, resonance-selective Raman power transfer (which vanishes for closely-spaced channels or with Raman disabled) -- specifically demonstrating that unlike the multimode intermodal-Raman term, this one *does* work for unmodulated/CW channels, since it uses the fixed channel separation rather than a co-located baseband convolution; and absolute inter-channel phase beta0 (delta_beta0's derivative reproduces `beta1_ref + delta_beta1` to 1e-13 relative error -- these are exact closed-form polynomials here, not an approximation -- plus an end-to-end propagation matching the closed-form delta_beta0*L prediction exactly).
 
@@ -186,6 +226,8 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 `tests/test_rayleigh_backscatter.py` validates elastic Rayleigh backscattering: the closed-form total-power formula matches brute-force numerical integration of the same underlying physics to 6e-6 relative error; backscattered power saturates to the analytic `alpha_R*S*P_in/(2*alpha)` asymptote as length grows rather than increasing without bound; and the time-resolved OTDR trace, integrated over return time, reproduces the same total power as the CW formula.
 
 `tests/test_brillouin.py` validates the SBS solver against the textbook threshold picture: negligible SBS-specific pump depletion well below the analytic threshold, ~10% depletion right at threshold rising to >65% well above it (with reflectivity climbing from ~1e-8 to ~0.65 in between), reflectivity collapsing by 9 orders of magnitude when detuned 10 linewidths off resonance, and exact conservation (to 1e-15) of the net one-way photon flux `P_pump(z)-P_stokes(z)` for a lossless fiber. Two real bugs were caught and fixed while building this: a missing `1/A_eff` factor converting the standard tabulated (intensity-based) `g_B` into the power-based coupled equations, and a sign-convention mismatch feeding WDM channel separations into `raman_gain_spectrum` (whose `Omega` argument follows `physical_freq = omega0 - Omega`, opposite to the direct channel-offset convention).
+
+`tests/test_hybrid_crosstalk.py` validates `HybridCrosstalkPropagator` against both propagators it combines: with `qkd_mode == bright_mode` (no real spatial separation), it reproduces `WDMPropagator`'s output exactly (<2e-9 relative error, including the absolute inter-channel/inter-mode phase term) and `QuantumWDMPropagator`'s ensemble-averaged noise floor statistically (ratio 0.97, within sampling error over 20 realizations); the deterministic Raman crosstalk coefficient vanishes exactly at zero channel separation (`raman_gain_spectrum`'s `Im(H_R)=0` at `Omega=0`); and `gamma_cross` matches `MultimodeFiberParams.gamma_matrix[qkd,bright]` directly. Three real bugs were caught and fixed while building this: a sign error in the channel-offset argument passed to `raman_gain_spectrum` (same class of bug as the one caught in `test_brillouin.py`), a completely missing absolute inter-field phase (`delta_beta0`) term -- the one piece of physics this module exists to add -- and a noise-generation bug where the cross-field term used peak power + frequency-domain shaping (correct for the *intramodal* term) instead of `QuantumWDMPropagator`'s local-instantaneous-power + time-domain white-noise recipe (correct for a *fixed-separation* term); all three were caught by comparing directly against the limiting-case propagators rather than by inspecting the formulas.
 
 ---
 
@@ -210,6 +252,8 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 | - | `raman_fiber_study.py` | Nonlinear fiber Raman scattering via `fiber/`: classical soliton self-frequency shift across SMF-28/HNLF/PCF, and quantum spontaneous-Raman noise (Stokes/anti-Stokes asymmetry) vs temperature | `images/raman_fiber/` |
 | - | `multimode_fiber_study.py` | Multimode (OM1-OM5) fiber via `fiber/multimode_*`: intermodal dispersion (DMD) broadening ordering across OM1-OM5, and intermodal Raman scattering (pump pulse in one mode group cross-Raman-shifting a probe pulse in another) | `images/multimode_fiber/` |
 | - | `wdm_brillouin_study.py` | WDM effects via `fiber/wdm_propagator.py`: XPM-induced chirp on a probe channel, Raman tilt across a 9-channel comb; stimulated Brillouin scattering via `fiber/brillouin.py`: the classic reflectivity/transmission threshold knee vs input power | `images/wdm_brillouin/` |
+| - | `om3_raman_noise_sweep.py` / `om3_raman_noise_sweep_pulsed.py` | Spontaneous Raman noise floor in OM3 (quasi-CW and 1 GHz/100 ps pulsed) across 12 lengths x 9 injected powers, via `fiber/quantum_multimode.py` | `images/om3_raman_noise/`, `images/om3_raman_noise_pulsed/` |
+| - | `hybrid_bb84_crosstalk.py` | Combined mode+wavelength crosstalk via `fiber/hybrid_crosstalk.py`: a bright reference (quasi-CW or 1 GHz pulsed) in OM3 mode group 1 / DWDM Ch 32 vs. a phase-encoded BB84 QKD signal in mode group 0 / Ch 34 -- spontaneous Raman noise landing in the QKD frame and XPM-induced differential phase between the signal's two time bins, swept over length and bright power | `images/hybrid_bb84_crosstalk/` |
 
 ### PINN / Machine Learning Studies (Recommendations #7-12)
 
