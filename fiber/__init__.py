@@ -21,6 +21,7 @@ core.dfb_laser / core.million_pulse_comparison / core.sld_injection.
     from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneous_brillouin_noise_power
     from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
     from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
+    from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
 
 Quick start
 -----------
@@ -127,6 +128,16 @@ another channel):
     hybrid = HybridCrosstalkPropagator(om3, qkd_mode=0, bright_mode=1,
                                         channel_separation_Hz=200e9, noise=True, seed=0)
     A_qkd_out, A_bright_out = hybrid.propagate(A_qkd_0, A_bright_0, dt, L=10e3)
+
+For estimating direct classical-carrier leakage through a finite-
+rejection receive filter (a distinct, linear, post-fiber mechanism from
+the in-fiber crosstalk above -- often the dominant one in practice):
+
+    from fiber.receiver_leakage import filter_leakage_photons
+
+    n_leaked = filter_leakage_photons(P_bright_launch_W=1e-3, L=10e3, fiber=om3,
+                                       bright_mode=1, filter_floor_dB=40.0,
+                                       omega_qkd=om3.omega0, gate_window_s=500e-12)
 """
 from fiber.materials import FiberMaterial, make_material
 from fiber.geometry import FiberGeometry, make_geometry
@@ -146,3 +157,4 @@ from fiber.polarization import PolarizationPropagator
 from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneous_brillouin_noise_power
 from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
 from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
+from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB

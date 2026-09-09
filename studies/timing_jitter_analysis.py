@@ -17,12 +17,8 @@ import time as _time
 
 from gsdfb import setup_plotting
 from gsdfb.analysis import absolute_jitter, period_jitter, allan_deviation
-from core.dfb_laser import DFBLaserParams, q, h, c
-from core.sld_injection import (
-    SLDParams, InjectionParams,
-    solve_sld_steady_state, sld_to_injection_field,
-)
-from core.million_pulse_comparison import simulate_pulses
+from core.dfb_laser import make_laser, q, h, c
+from core.million_pulse_comparison import simulate_pulses_waveform
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -35,26 +31,43 @@ if __name__ == '__main__':
     print("  Timing Jitter Analysis — 1M Pulses, 1-10 GHz")
     print("=" * 70)
 
-    laser = DFBLaserParams()
+    laser = make_laser('dfb', lambda0=1547e-9, L=150e-6)
     I_th = laser.threshold_current()
-    sld = SLDParams()
 
-    sld_result = solve_sld_steady_state(sld, 150e-3)
-    P_sld = sld_result['P_out']
-    inj = InjectionParams(eta_coupling=0.10)
-    inj.compute_derived(laser)
-    S_INJ, _ = sld_to_injection_field(sld, P_sld, laser, inj,
-                                       acceptance_bandwidth=500e9)
+    # Sinusoidal drive matching paper_10ghz_simulation.py
+    I_DC = 45.5e-3        # laser DC bias (A)
+    V_RF_AMP = 3.7        # RF voltage amplitude (V)
+    Z_MATCH = 50.0        # matched impedance
+    I_RF = V_RF_AMP / Z_MATCH  # peak RF current (74 mA)
+
+    # SLD injection: 19 mW total, using paper_10ghz_simulation coupling model
+    def sld_power_to_sinj(P_sld_mW, sld_bw_nm=33.0, acceptance_bw_nm=8.0):
+        spectral_frac = acceptance_bw_nm / sld_bw_nm
+        coupling_loss = 0.5
+        total_coupling = spectral_frac * coupling_loss
+        P_coupled_W = total_coupling * P_sld_mW * 1e-3
+        nu0 = c / laser.lambda0
+        return P_coupled_W * laser.tau_p / (h * nu0 * laser.V)
+
+    S_INJ = sld_power_to_sinj(19.0)
 
     N_PULSES = 1_000_000
     N_DISCARD = 1000
-    DT = 1.0e-12
-    DUTY = 0.30
-    I_BIAS_FACTOR = 0.9
-    I_PEAK_FACTOR = 5.0
+    DT = 0.5e-12
 
-    I_off = I_BIAS_FACTOR * I_th
-    I_on = I_PEAK_FACTOR * I_th
+    # Effective duty cycle from sinusoidal drive
+    sin_thresh = (I_th - I_DC) / I_RF
+    if sin_thresh <= -1.0:
+        DUTY = 1.0
+    elif sin_thresh >= 1.0:
+        DUTY = 0.0
+    else:
+        DUTY = 1.0 - np.arccos(-sin_thresh) / np.pi
+
+    def build_sine_waveform(pts_period, dt, f_rep):
+        t = np.arange(pts_period) * dt
+        waveform = I_DC + I_RF * np.sin(2.0 * np.pi * f_rep * t)
+        return np.maximum(waveform, 0.0).astype(np.float64)
 
     freqs = np.arange(1, 11) * 1e9
     f_ghz = freqs * 1e-9
@@ -64,13 +77,13 @@ if __name__ == '__main__':
     # Warmup
     print("\n  Compiling JIT solver...")
     t0 = _time.time()
-    _w = simulate_pulses(
-        100, 10, 100, 1e-12,
-        I_off, I_on, 30e-12, 7e-12,
+    _wf = build_sine_waveform(100, 1e-12, 10e9)
+    _w = simulate_pulses_waveform(
+        100, 10, 100, 1e-12, _wf,
         laser.V, laser.Gamma, laser.v_g, laser.a, laser.N_tr, laser.epsilon,
         laser.A, laser.B, laser.C, laser.tau_p, laser.beta_sp, laser.alpha_H, q,
         0.0, 0)
-    del _w
+    del _w, _wf
     print(f"  Compiled in {_time.time()-t0:.1f}s")
 
     data = {}
@@ -78,10 +91,9 @@ if __name__ == '__main__':
 
     for f_rep in freqs:
         T_rep = 1.0 / f_rep
-        t_on = DUTY * T_rep
-        pts = max(int(round(T_rep / DT)), 50)
+        pts = max(int(round(T_rep / DT)), 100)
         dt = T_rep / pts
-        t_rise = min(20e-12, t_on / 4.0)
+        waveform = build_sine_waveform(pts, dt, f_rep)
 
         for case, s_inj in [('free', 0.0), ('sld', S_INJ)]:
             key = f"{f_rep*1e-9:.0f}GHz_{case}"
@@ -90,9 +102,9 @@ if __name__ == '__main__':
             print(f"  {key:14s} ...", end="", flush=True)
             t0 = _time.time()
 
-            phi, pk_S, sm_S, pk_k = simulate_pulses(
+            phi, pk_S, sm_S, pk_k = simulate_pulses_waveform(
                 N_PULSES + N_DISCARD, N_DISCARD, pts, dt,
-                I_off, I_on, t_on, t_rise,
+                waveform,
                 laser.V, laser.Gamma, laser.v_g, laser.a,
                 laser.N_tr, laser.epsilon,
                 laser.A, laser.B, laser.C,
@@ -136,8 +148,8 @@ if __name__ == '__main__':
     fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
     fig1.suptitle(
         'Timing Jitter vs Repetition Rate — 1M Pulses\n'
-        f'I$_{{bias}}$={I_BIAS_FACTOR}$\\times$I$_{{th}}$, '
-        f'I$_{{peak}}$={I_PEAK_FACTOR}$\\times$I$_{{th}}$, '
+        f'I$_{{DC}}$={I_DC*1e3:.1f} mA, '
+        f'V$_{{RF}}$={V_RF_AMP} V (sine), '
         f'S$_{{inj}}$={S_INJ:.1e} m$^{{-3}}$',
         fontsize=12)
 
@@ -393,3 +405,8 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("  Done.")
     print("=" * 70)
+
+    # ---- persist every array in this run so the figures can be redrawn
+    #      from disk without re-simulating (see FIGURES.md)
+    from gsdfb.io import save_run
+    save_run(locals(), 'images/timing_jitter/timing_jitter_data.npz')

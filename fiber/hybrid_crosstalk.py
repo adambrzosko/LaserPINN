@@ -44,6 +44,31 @@ INSTANTANEOUS (Raman) or PEAK (noise) power directly, exactly as in
 fiber.wdm_propagator / fiber.quantum_wdm, so both work for a CW/quasi-CW
 bright signal as well as a pulsed one.
 
+Launch-side mode crosstalk (optional, launch_extinction_dB)
+-------------------------------------------------------------
+The spatial-overlap picture above assumes the bright field is launched
+with perfect modal purity into bright_mode. A real mode-selective launch
+device (e.g. a photonic lantern) has finite mode extinction between its
+ports -- typically ~15-20 dB, not infinite -- so a fraction of the
+nominal bright_mode launch power actually appears DIRECTLY in qkd_mode
+at z=0, co-propagating with the QKD signal in the SAME spatial mode from
+the very start. This is a qualitatively different (and typically much
+stronger) coupling pathway than the fiber-propagation spatial-overlap
+term above: it uses the FULL same-mode nonlinear coefficient
+gamma_matrix[qkd_mode, qkd_mode] (not the weaker gamma_cross), exactly
+like a same-mode WDMPropagator channel pair, because by the time this
+leaked light is in qkd_mode, it propagates as an ordinary qkd_mode field
+at the bright channel's wavelength -- indistinguishable, downstream of
+the launch device, from having been launched there directly. Modeled as
+a third field, with launch amplitude bright's own envelope scaled by
+10^(-launch_extinction_dB/20), propagating with qkd_mode's own dispersion
+(it now occupies that waveguide) at the bright channel's fixed carrier
+offset, and contributing XPM + deterministic Raman crosstalk + spontaneous
+Raman noise onto the QKD field via the same mechanisms as the bright
+field above, but with gamma_matrix[qkd_mode,qkd_mode] in place of
+gamma_cross. Off (launch_extinction_dB=None) by default, reproducing the
+exact behavior validated before this feature existed.
+
     from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
 """
 import numpy as np
@@ -74,15 +99,21 @@ class HybridCrosstalkPropagator:
     noise : bool -- add spontaneous-Raman Langevin noise to the QKD
         field (both intramodal and from the bright field); requires seed
     seed : int or None -- RNG seed, only used if noise=True
+    launch_extinction_dB : float or None -- mode extinction ratio (dB,
+        positive) between the bright_mode and qkd_mode ports of the
+        launch device (e.g. a photonic lantern). None (default) models a
+        perfectly pure launch, i.e. no launch-side crosstalk term. See
+        module docstring "Launch-side mode crosstalk".
     """
 
     def __init__(self, fiber, qkd_mode, bright_mode, channel_separation_Hz,
-                 include_raman=True, noise=False, seed=None):
+                 include_raman=True, noise=False, seed=None, launch_extinction_dB=None):
         self.fiber = fiber
         self.qkd_mode = qkd_mode
         self.bright_mode = bright_mode
         self.include_raman = include_raman
         self.noise = noise
+        self.launch_extinction_dB = launch_extinction_dB
         self.channel_offset = 2 * np.pi * channel_separation_Hz  # rad/s, bright - qkd
 
         self.gamma_cross = fiber.gamma_matrix[qkd_mode, bright_mode]
@@ -133,6 +164,29 @@ class HybridCrosstalkPropagator:
                                        else abs(self.g_R_cross) * n_th)
             self.rng = np.random.default_rng(seed)
 
+        self.leak_active = launch_extinction_dB is not None
+        if self.leak_active:
+            self.leak_amplitude_scale = 10 ** (-launch_extinction_dB / 20.0)
+
+            # once leaked into qkd_mode, this light propagates as an
+            # ordinary qkd_mode field at the bright channel's wavelength --
+            # so it uses the FULL same-mode gamma (not gamma_cross) both
+            # for its own SPM and for its XPM/Raman crosstalk onto QKD
+            self.gamma_leak = fiber.gamma_matrix[qkd_mode, qkd_mode]
+            self.g_R_leak = raman_gain_spectrum(
+                fiber.material, self.channel_offset, self.gamma_leak)
+
+            # dispersion/walk-off: qkd_mode's own waveguide, at the bright
+            # channel's carrier offset (mirrors interchannel_beta1 above,
+            # but with qkd_mode's beta2/beta3 instead of bright_mode's)
+            self.interchannel_beta1_leak = (fiber.beta2[qkd_mode] * self.channel_offset
+                                             + 0.5 * fiber.beta3[qkd_mode] * self.channel_offset ** 2)
+
+            if noise:
+                gain_side_leak = self.g_R_leak > 0
+                self._leak_noise_gain = (self.g_R_leak * (n_th + 1) if gain_side_leak
+                                          else abs(self.g_R_leak) * n_th)
+
     def propagate(self, A_qkd_0, A_bright_0, dt, L, step_size=20.0, n_steps=None):
         """Propagate the QKD + bright fields through fiber length L (m).
 
@@ -168,6 +222,13 @@ class HybridCrosstalkPropagator:
         D_half_qkd = np.exp(base_qkd * dz / 2)
         D_half_bright = np.exp(base_bright * dz / 2)
 
+        if self.leak_active:
+            base_leak = (-fiber.alpha[q] / 2 + 1j * fiber.beta2[q] / 2 * Omega ** 2
+                         - 1j * fiber.beta3[q] / 6 * Omega ** 3
+                         - 1j * (fiber.delta_beta1[q] + self.interchannel_beta1_leak) * Omega)
+            D_half_leak = np.exp(base_leak * dz / 2)
+            A_leak_f = np.fft.fft((A_bright_0 * self.leak_amplitude_scale).astype(complex))
+
         if self.noise:
             g_R_self = raman_gain_spectrum(fiber.material, Omega, fiber.gamma_matrix[q, q])
             n_th_self = fiber.material.phonon_occupation(Omega)
@@ -188,6 +249,9 @@ class HybridCrosstalkPropagator:
             A_bright_f *= D_half_bright
             A_qkd_t = np.fft.ifft(A_qkd_f)
             A_bright_t = np.fft.ifft(A_bright_f)
+            if self.leak_active:
+                A_leak_f *= D_half_leak
+                A_leak_t = np.fft.ifft(A_leak_f)
 
             P_qkd = np.abs(A_qkd_t) ** 2
             P_bright = np.abs(A_bright_t) ** 2
@@ -210,6 +274,23 @@ class HybridCrosstalkPropagator:
             xpm_from_bright = 2 * (1 - f_R) * P_bright if self.include_raman else 2 * P_bright
             kerr_phase_qkd = gamma_self_qkd * spm_qkd + self.gamma_cross * xpm_from_bright
             raman_crosstalk_qkd = 0.5 * self.g_R_cross * P_bright if self.include_raman else 0.0
+
+            if self.leak_active:
+                P_leak = np.abs(A_leak_t) ** 2
+                if self.include_raman and f_R > 0:
+                    conv_leak = np.real(np.fft.ifft(np.fft.fft(P_leak) * H_R))
+                    spm_leak = (1 - f_R) * P_leak + f_R * conv_leak
+                    xpm_from_leak = 2 * (1 - f_R) * P_leak
+                else:
+                    spm_leak = P_leak
+                    xpm_from_leak = 2 * P_leak
+                # same-mode coupling: full gamma_leak (=gamma_matrix[q,q]),
+                # not the weaker gamma_cross, since this light now occupies
+                # qkd_mode's own waveguide
+                kerr_phase_qkd = kerr_phase_qkd + self.gamma_leak * xpm_from_leak
+                raman_crosstalk_qkd = raman_crosstalk_qkd + (
+                    0.5 * self.g_R_leak * P_leak if self.include_raman else 0.0)
+
             A_qkd_t = A_qkd_t * np.exp((1j * kerr_phase_qkd + raman_crosstalk_qkd) * dz)
 
             if self.noise:
@@ -234,12 +315,24 @@ class HybridCrosstalkPropagator:
 
                 A_qkd_t = A_qkd_t + noise_self + noise_cross
 
+                if self.leak_active:
+                    psd_leak = hbar * abs(fiber.omega0) * self._leak_noise_gain * P_leak
+                    amp_leak = np.sqrt(np.clip(psd_leak, 0, None) * dz / dt)
+                    noise_leak = amp_leak * (self.rng.standard_normal(n_pts)
+                                              + 1j * self.rng.standard_normal(n_pts)) / np.sqrt(2)
+                    A_qkd_t = A_qkd_t + noise_leak
+
             # bright field: self-dynamics only (QKD back-action negligible)
             kerr_phase_bright = gamma_self_bright * spm_bright
             A_bright_t = A_bright_t * np.exp(1j * kerr_phase_bright * dz)
 
             A_qkd_f = np.fft.fft(A_qkd_t) * D_half_qkd
             A_bright_f = np.fft.fft(A_bright_t) * D_half_bright
+            if self.leak_active:
+                # leak field: self-dynamics only (same one-way approximation)
+                kerr_phase_leak = self.gamma_leak * spm_leak
+                A_leak_t = A_leak_t * np.exp(1j * kerr_phase_leak * dz)
+                A_leak_f = np.fft.fft(A_leak_t) * D_half_leak
 
         A_qkd_out = np.fft.ifft(A_qkd_f)
         A_bright_out = np.fft.ifft(A_bright_f) * np.exp(1j * self.delta_beta0_bright * L)

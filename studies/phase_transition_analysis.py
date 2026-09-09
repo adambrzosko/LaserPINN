@@ -27,12 +27,8 @@ import numpy as np
 from scipy.optimize import curve_fit
 import time as _time
 
-from core.dfb_laser import DFBLaserParams, q, h, c
-from core.sld_injection import (
-    SLDParams, InjectionParams,
-    solve_sld_steady_state, sld_to_injection_field,
-)
-from core.million_pulse_comparison import simulate_pulses
+from core.dfb_laser import make_laser, q, h, c
+from core.million_pulse_comparison import simulate_pulses_waveform
 from gsdfb import compute_r1
 from gsdfb.analysis import compute_metrics as _compute_metrics
 
@@ -97,38 +93,56 @@ if __name__ == '__main__':
     print("  Coherence Threshold as a Phase Transition")
     print("=" * 70)
 
-    laser = DFBLaserParams()
+    laser = make_laser('dfb', lambda0=1547e-9, L=150e-6)
     I_th = laser.threshold_current()
-    sld = SLDParams()
 
-    N_PULSES = 200_000
+    N_PULSES = 1_000_000
     N_DISCARD = 500
-    DT = 1.0e-12
-    DUTY = 0.30
-    I_BIAS_FACTOR = 0.9
-    I_PEAK_FACTOR = 5.0
+    DT = 0.5e-12
 
-    I_off = I_BIAS_FACTOR * I_th
-    I_on = I_PEAK_FACTOR * I_th
+    # Sinusoidal drive matching paper_10ghz_simulation.py
+    I_DC = 45.5e-3        # laser DC bias (A)
+    V_RF_AMP = 3.7        # RF voltage amplitude (V)
+    Z_MATCH = 50.0        # matched impedance
+    I_RF = V_RF_AMP / Z_MATCH  # peak RF current (74 mA)
+
+    # Effective duty cycle: fraction of period where I(t) >= I_th
+    # I(t) = I_DC + I_RF*sin(theta) >= I_th
+    # sin(theta) >= (I_th - I_DC)/I_RF
+    sin_thresh = (I_th - I_DC) / I_RF
+    if sin_thresh <= -1.0:
+        DUTY = 1.0
+    elif sin_thresh >= 1.0:
+        DUTY = 0.0
+    else:
+        DUTY = 1.0 - np.arccos(-sin_thresh) / np.pi
 
     # Sweep parameters
     S_inj_values = np.logspace(16.5, 22, 24)
-    target_freqs = [3e9, 4e9, 5e9, 7e9, 10e9]
-    freq_colors = {3e9: 'C0', 4e9: 'C1', 5e9: 'C2', 7e9: 'C4', 10e9: 'C3'}
+    target_freqs = [1e9, 2e9, 3e9, 4e9, 5e9, 6e9, 7e9, 8e9, 10e9]
+    freq_colors = {
+        1e9: 'C0', 2e9: 'C1', 3e9: 'C2', 4e9: 'C3', 5e9: 'C4',
+        6e9: 'C5', 7e9: 'C6', 8e9: 'C7', 10e9: 'C8',
+    }
 
     print(f"  {N_PULSES/1e3:.0f}k pulses, {len(S_inj_values)} S_inj × "
           f"{len(target_freqs)} frequencies = {len(S_inj_values)*len(target_freqs)} runs")
 
+    def build_sine_waveform(pts_period, dt, f_rep):
+        t = np.arange(pts_period) * dt
+        waveform = I_DC + I_RF * np.sin(2.0 * np.pi * f_rep * t)
+        return np.maximum(waveform, 0.0).astype(np.float64)
+
     # Warmup
     print("  Compiling JIT solver...")
     t0 = _time.time()
-    _w = simulate_pulses(
-        100, 10, 100, 1e-12,
-        I_off, I_on, 30e-12, 7e-12,
+    _wf = build_sine_waveform(100, 1e-12, 10e9)
+    _w = simulate_pulses_waveform(
+        100, 10, 100, 1e-12, _wf,
         laser.V, laser.Gamma, laser.v_g, laser.a, laser.N_tr, laser.epsilon,
         laser.A, laser.B, laser.C, laser.tau_p, laser.beta_sp, laser.alpha_H, q,
         0.0, 0)
-    del _w
+    del _w, _wf
     print(f"  Compiled in {_time.time()-t0:.1f}s")
 
     # ── Run sweep ────────────────────────────────────────────────────────
@@ -138,12 +152,11 @@ if __name__ == '__main__':
 
     for f_rep in target_freqs:
         T_rep = 1.0 / f_rep
-        t_on = DUTY * T_rep
         T_off = (1 - DUTY) * T_rep
-        pts = max(int(round(T_rep / DT)), 50)
+        pts = max(int(round(T_rep / DT)), 100)
         dt = T_rep / pts
-        t_rise = min(20e-12, t_on / 4.0)
         fg = f_rep * 1e-9
+        waveform = build_sine_waveform(pts, dt, f_rep)
 
         print(f"\n  {fg:.0f} GHz  (T_off = {T_off*1e12:.0f} ps, "
               f"T_off/tau_p = {T_off/laser.tau_p:.1f})")
@@ -152,9 +165,9 @@ if __name__ == '__main__':
         for i, s_inj in enumerate(S_inj_values):
             seed = 42 + int(fg) * 100 + i + 1
 
-            phi, pk_S, _, pk_k = simulate_pulses(
+            phi, pk_S, _, pk_k = simulate_pulses_waveform(
                 N_PULSES + N_DISCARD, N_DISCARD, pts, dt,
-                I_off, I_on, t_on, t_rise,
+                waveform,
                 laser.V, laser.Gamma, laser.v_g, laser.a,
                 laser.N_tr, laser.epsilon,
                 laser.A, laser.B, laser.C,
@@ -223,17 +236,29 @@ if __name__ == '__main__':
 
     # ── Fit S_c vs frequency: S_c = A * exp(B * T_off / tau_p) ─────────
 
-    T_off_vals = np.array([(1 - DUTY) / f for f in target_freqs])
-    ratio_vals = T_off_vals / laser.tau_p
-    log_Sc = np.array([np.log(S_c[f]) for f in target_freqs])
+    S_inj_max = S_inj_values[-1]
+    fit_freqs = [f for f in target_freqs if S_c[f] < 0.99 * S_inj_max]
+    skip_freqs = [f for f in target_freqs if f not in fit_freqs]
+    if skip_freqs:
+        print(f"\n  Excluding from S_c fit (no transition detected):",
+              ", ".join(f"{f*1e-9:.0f} GHz" for f in skip_freqs))
 
-    # Linear fit in semi-log: log(S_c) = a + b * (T_off/tau_p)
-    coeffs = np.polyfit(ratio_vals, log_Sc, 1)
-    b_fit, a_fit = coeffs
-    print(f"\n  Scaling fit: ln(S_c) = {a_fit:.2f} + {b_fit:.3f} × T_off/tau_p")
-    print(f"  => S_c propto exp({b_fit:.3f} × T_off/tau_p)")
-    print(f"  Physical: S_res ~ S_peak × exp(-T_off/tau_p) with effective decay "
-          f"rate ~ {-b_fit:.3f}/tau_p")
+    T_off_vals = np.array([(1 - DUTY) / f for f in fit_freqs])
+    ratio_vals = T_off_vals / laser.tau_p
+    log_Sc = np.array([np.log(S_c[f]) for f in fit_freqs])
+
+    if len(fit_freqs) >= 3:
+        coeffs = np.polyfit(ratio_vals, log_Sc, 1)
+        b_fit, a_fit = coeffs
+        print(f"\n  Scaling fit ({len(fit_freqs)} freqs): "
+              f"ln(S_c) = {a_fit:.2f} + {b_fit:.3f} × T_off/tau_p")
+        print(f"  => S_c propto exp({b_fit:.3f} × T_off/tau_p)")
+        print(f"  Physical: S_res ~ S_peak × exp(-T_off/tau_p) with effective decay "
+              f"rate ~ {-b_fit:.3f}/tau_p")
+    else:
+        b_fit, a_fit = -0.05, 45.0
+        print(f"\n  WARNING: only {len(fit_freqs)} frequencies with real transition; "
+              f"S_c fit unreliable")
 
     # ── Critical exponent fit ────────────────────────────────────────────
 
@@ -267,6 +292,7 @@ if __name__ == '__main__':
         print(f"  Discrepancy: {abs(beta_fit - 0.5):.3f}")
     else:
         beta_fit = 0.5
+        beta_err = 0.0
         C_fit = np.sqrt(np.pi)
         print("  Insufficient data for fit; using theoretical beta = 0.5")
 
@@ -382,28 +408,40 @@ if __name__ == '__main__':
     f_arr = np.array([f * 1e-9 for f in target_freqs])
     Sc_arr = np.array([S_c[f] for f in target_freqs])
     ratio_arr = np.array([(1 - DUTY) / (f * laser.tau_p) for f in target_freqs])
+    # Mark which frequencies had a real transition
+    has_transition = np.array([f in fit_freqs for f in target_freqs])
 
     # (a) S_c vs frequency
     ax = axes3[0]
-    ax.semilogy(f_arr, Sc_arr, 'ko-', lw=2, ms=8)
+    ax.semilogy(f_arr[has_transition], Sc_arr[has_transition], 'ko-', lw=2, ms=8)
+    if np.any(~has_transition):
+        ax.semilogy(f_arr[~has_transition], Sc_arr[~has_transition],
+                    'kx', ms=10, mew=2, label='No transition (saturated)')
     for i, fg in enumerate(f_arr):
         ax.annotate(f'  {Sc_arr[i]:.1e}', (fg, Sc_arr[i]),
-                    fontsize=8, va='bottom')
+                    fontsize=7, va='bottom')
     ax.set_xlabel('Repetition rate (GHz)', fontsize=12)
     ax.set_ylabel('Critical $S_c$ (m$^{-3}$)', fontsize=12)
     ax.set_title('Critical injection vs repetition rate')
     ax.set_xticks(f_arr)
+    if np.any(~has_transition):
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # (b) S_c vs T_off/tau_p — should be linear in semi-log
     ax = axes3[1]
-    ax.semilogy(ratio_arr, Sc_arr, 'ko', ms=10, zorder=5)
+    ax.semilogy(ratio_arr[has_transition], Sc_arr[has_transition],
+                'ko', ms=10, zorder=5)
+    if np.any(~has_transition):
+        ax.semilogy(ratio_arr[~has_transition], Sc_arr[~has_transition],
+                    'kx', ms=10, mew=2, alpha=0.4, label='No transition')
 
-    # Fit line
-    ratio_fit = np.linspace(ratio_arr.min() * 0.8, ratio_arr.max() * 1.1, 100)
-    Sc_fit = np.exp(a_fit + b_fit * ratio_fit)
-    ax.semilogy(ratio_fit, Sc_fit, 'r--', lw=2,
-                label=f'Fit: $S_c \\propto \\exp({b_fit:.2f}\\, T_{{off}}/\\tau_p)$')
+    # Fit line (only from fit_freqs)
+    if len(fit_freqs) >= 3:
+        ratio_fit = np.linspace(ratio_vals.min() * 0.8, ratio_vals.max() * 1.2, 100)
+        Sc_fit = np.exp(a_fit + b_fit * ratio_fit)
+        ax.semilogy(ratio_fit, Sc_fit, 'r--', lw=2,
+                    label=f'Fit: $S_c \\propto \\exp({b_fit:.2f}\\, T_{{off}}/\\tau_p)$')
 
     for i, fg in enumerate(f_arr):
         ax.annotate(f'  {fg:.0f} GHz', (ratio_arr[i], Sc_arr[i]),
@@ -411,11 +449,14 @@ if __name__ == '__main__':
 
     ax.set_xlabel('$T_{off} / \\tau_p$', fontsize=12)
     ax.set_ylabel('Critical $S_c$ (m$^{-3}$)', fontsize=12)
-    ax.set_title(
-        'Scaling: $S_c \\propto S_{res}^{-1} \\propto \\exp(+T_{off}/\\tau_{eff})$\n'
-        f'Effective decay rate: $\\tau_{{eff}}$ = {-1/b_fit * laser.tau_p*1e12:.1f} ps '
-        f'(vs $\\tau_p$ = {laser.tau_p*1e12:.1f} ps)')
-    ax.legend(fontsize=10)
+    if len(fit_freqs) >= 3 and b_fit < 0:
+        ax.set_title(
+            'Scaling: $S_c \\propto S_{res}^{-1} \\propto \\exp(+T_{off}/\\tau_{eff})$\n'
+            f'Effective decay rate: $\\tau_{{eff}}$ = {-1/b_fit * laser.tau_p*1e12:.1f} ps '
+            f'(vs $\\tau_p$ = {laser.tau_p*1e12:.1f} ps)')
+    else:
+        ax.set_title('$S_c$ vs normalised off-time')
+    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -444,11 +485,14 @@ if __name__ == '__main__':
                     s=30, vmin=0, vmax=1, edgecolors='none')
     plt.colorbar(sc, ax=ax, label='$r_1$')
 
-    # Critical line
-    f_dense = np.linspace(2, 10, 100)
-    ratio_dense = (1 - DUTY) / (f_dense * 1e9 * laser.tau_p)
-    Sc_dense = np.exp(a_fit + b_fit * ratio_dense)
-    ax.plot(f_dense, Sc_dense, 'k--', lw=2, label='$S_c$ (critical line)')
+    # Critical line (only over fit range)
+    if len(fit_freqs) >= 3:
+        f_min_fit = min(f * 1e-9 for f in fit_freqs)
+        f_max_fit = max(f * 1e-9 for f in fit_freqs)
+        f_dense = np.linspace(f_min_fit, f_max_fit, 100)
+        ratio_dense = (1 - DUTY) / (f_dense * 1e9 * laser.tau_p)
+        Sc_dense = np.exp(a_fit + b_fit * ratio_dense)
+        ax.plot(f_dense, Sc_dense, 'k--', lw=2, label='$S_c$ (critical line)')
 
     ax.set_yscale('log')
     ax.set_xlabel('Repetition rate (GHz)', fontsize=12)
@@ -532,13 +576,20 @@ if __name__ == '__main__':
         fg = f_rep * 1e-9
         T_off = (1 - DUTY) / f_rep
         print(f"  {fg:5.0f}  {T_off/laser.tau_p:11.1f}  {S_c[f_rep]:12.2e}")
-    print(f"\n  Fit: S_c ~ exp({b_fit:.3f} × T_off/tau_p)")
-    print(f"  Effective photon decay time during off-phase:")
-    print(f"    tau_eff = {-1/b_fit * laser.tau_p*1e12:.1f} ps  "
-          f"(vs tau_p = {laser.tau_p*1e12:.1f} ps)")
-    print(f"    Interpretation: gain at I_bias = 0.9×I_th partially")
-    print(f"    compensates cavity loss, extending photon lifetime by"
-          f" {-1/(b_fit * laser.tau_p) / (1/laser.tau_p):.1f}×")
+    if len(fit_freqs) >= 3:
+        print(f"\n  Fit ({len(fit_freqs)} freqs): S_c ~ exp({b_fit:.3f} × T_off/tau_p)")
+        if b_fit < 0:
+            print(f"  Effective photon decay time during off-phase:")
+            print(f"    tau_eff = {-1/b_fit * laser.tau_p*1e12:.1f} ps  "
+                  f"(vs tau_p = {laser.tau_p*1e12:.1f} ps)")
+            print(f"    Interpretation: gain at I_bias partially compensates "
+                  f"cavity loss, extending photon lifetime by"
+                  f" {-1/(b_fit * laser.tau_p) / (1/laser.tau_p):.1f}×")
+        else:
+            print(f"  WARNING: positive slope — fit may be unreliable")
+    else:
+        print(f"\n  WARNING: only {len(fit_freqs)} freqs with transition, "
+              f"no reliable S_c fit")
 
     print("\n  Universality: all frequencies collapse onto one master curve")
     print("  when S_inj is rescaled by S_c(f_rep).")
@@ -550,3 +601,8 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("  Done.")
     print("=" * 70)
+
+    # ---- persist every array in this run so the figures can be redrawn
+    #      from disk without re-simulating (see FIGURES.md)
+    from gsdfb.io import save_run
+    save_run(locals(), 'images/phase_transition/phase_transition_data_9freq.npz')

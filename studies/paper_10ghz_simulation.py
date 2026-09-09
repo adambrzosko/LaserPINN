@@ -138,7 +138,7 @@ def run_config(laser, f_rep, S_inj, n_pulses, n_discard=200, seed=42):
     # AMZI
     I_A, I_B, eta = amzi_outputs(pk_P, pk_phi)
 
-    # Multi-lag autocorrelation
+    # Multi-lag phase autocorrelation
     max_lag = min(50, n_pulses // 10)
     autocorr = np.zeros(max_lag)
     for k in range(max_lag):
@@ -148,13 +148,25 @@ def run_config(laser, f_rep, S_inj, n_pulses, n_discard=200, seed=42):
             autocorr[k] = float(np.abs(
                 np.mean(np.exp(1j * (pk_phi[k:] - pk_phi[:-k])))))
 
+    # Intensity (eta) autocorrelation — normalised covariance
+    eta_ac = np.zeros(max_lag)
+    eta_centered = eta - np.mean(eta)
+    eta_var = float(np.var(eta))
+    for k in range(max_lag):
+        if k == 0:
+            eta_ac[k] = 1.0
+        elif eta_var > 0:
+            eta_ac[k] = float(np.mean(eta_centered[k:] * eta_centered[:-k])) / eta_var
+        else:
+            eta_ac[k] = 0.0
+
     return dict(
         r1=r1, dphi=dphi, pq=pq,
         sigma_t=sigma_t, t_peak=t_peak,
         mean_P=mean_P, cv_P=cv_P,
         pk_phi=pk_phi, pk_S=pk_S, pk_P=pk_P, pk_k=pk_k,
         eta=eta, I_A=I_A, I_B=I_B,
-        autocorr=autocorr, dt=dt, pts=pts,
+        autocorr=autocorr, eta_autocorr=eta_ac, dt=dt, pts=pts,
         kl=pq['kl'], ks_stat=pq['ks_stat'],
     )
 
@@ -234,9 +246,9 @@ if __name__ == '__main__':
 
     # ── Part 1: Frequency sweep — free-running vs SLD-injected ───────
 
-    N_PULSES = 500_000
-    freqs = [1e9, 5e9, 8e9, 10e9]
-    freq_labels = ['1 GHz', '5 GHz', '8 GHz', '10 GHz']
+    N_PULSES = 1_000_000
+    freqs = [1e9, 2e9, 5e9, 8e9, 10e9]
+    freq_labels = ['1 GHz', '2 GHz', '5 GHz', '8 GHz', '10 GHz']
 
     print(f"\n  Part 1: Frequency sweep ({N_PULSES//1000}k pulses)")
 
@@ -255,42 +267,83 @@ if __name__ == '__main__':
             print(f" {elapsed:.1f}s  r1={r['r1']:.4f}  "
                   f"KL={r['kl']:.4f}  jitter={r['sigma_t']*1e12:.1f}ps")
 
-    # ── Figure 1: AMZI histograms ────────────────────────────────────
+    # ── Figure 1: AMZI histograms + η autocorrelation ────────────────
+    #   4 rows × 5 cols:
+    #     Row 0: free-running η histograms
+    #     Row 1: free-running η autocorrelation
+    #     Row 2: SLD-injected η histograms
+    #     Row 3: SLD-injected η autocorrelation
 
-    fig1, axes1 = plt.subplots(2, 4, figsize=(20, 8))
+    n_freq = len(freqs)
+    fig1, axes1 = plt.subplots(4, n_freq, figsize=(4 * n_freq, 14))
     fig1.suptitle(
-        'AMZI Splitting-Ratio Histograms\n'
-        'Top: free-running | Bottom: 19 mW SLD injection',
-        fontsize=13)
+        'AMZI Splitting Ratio: Histograms and Autocorrelation\n'
+        'Rows 1–2: free-running | Rows 3–4: 19 mW SLD injection',
+        fontsize=13, y=0.98)
 
     # Theoretical arcsine PDF for reference
     eta_th = np.linspace(0.001, 0.999, 500)
     arcsine_pdf = 1.0 / (np.pi * np.sqrt(eta_th * (1.0 - eta_th)))
 
+    # Bartlett 99% CI for η autocorrelation under H0: iid
+    ci99_eta = 2.576 / np.sqrt(N_PULSES)
+
     for col, (f_rep, flabel) in enumerate(zip(freqs, freq_labels)):
-        for row, inj_label in enumerate(['free', 'sld']):
+        for blk, inj_label in enumerate(['free', 'sld']):
             key = f'{flabel}_{inj_label}'
             r = results[key]
-            ax = axes1[row, col]
 
-            ax.hist(r['eta'], bins=200, density=True, alpha=0.7,
-                    color='C0' if row == 0 else 'C1',
-                    label=f'Simulation (r$_1$={r["r1"]:.3f})')
-            ax.plot(eta_th, arcsine_pdf, 'k--', lw=1.2, alpha=0.6,
-                    label='Arcsine (ideal)')
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 12)
-            ax.set_xlabel('Splitting ratio $\\eta$')
+            row_hist = 2 * blk       # 0 for free, 2 for sld
+            row_ac   = 2 * blk + 1   # 1 for free, 3 for sld
+
+            # ── Histogram panel ──
+            ax_h = axes1[row_hist, col]
+            ax_h.hist(r['eta'], bins=200, density=True, alpha=0.7,
+                      color='C0' if blk == 0 else 'C1',
+                      label=f'Sim (r$_1$={r["r1"]:.3f})')
+            ax_h.plot(eta_th, arcsine_pdf, 'k--', lw=1.2, alpha=0.6,
+                      label='Arcsine')
+            ax_h.set_xlim(0, 1)
+            ax_h.set_ylim(0, 12)
+            if row_hist == 0:
+                ax_h.set_title(flabel, fontsize=11)
             if col == 0:
-                ax.set_ylabel('Probability density')
-            ax.set_title(f'{flabel}' + (' — Free' if row == 0 else ' — SLD'))
-            ax.legend(fontsize=7, loc='upper center')
-            ax.grid(True, alpha=0.3)
+                tag = 'Free' if blk == 0 else 'SLD'
+                ax_h.set_ylabel(f'{tag} — PDF')
+            ax_h.legend(fontsize=6, loc='upper center')
+            ax_h.grid(True, alpha=0.3)
+            if row_hist < 2:
+                ax_h.set_xticklabels([])
+            else:
+                ax_h.set_xlabel('$\\eta$')
 
-    plt.tight_layout()
-    save_fig(fig1, f'{out}/amzi_histograms.png')
+            # ── Autocorrelation panel ──
+            ax_a = axes1[row_ac, col]
+            eta_ac = r['eta_autocorr']
+            lags = np.arange(len(eta_ac))
+            ax_a.bar(lags[1:], eta_ac[1:], width=0.8,
+                     color='C0' if blk == 0 else 'C1', alpha=0.7)
+            ax_a.axhline(+ci99_eta, color='r', ls='--', lw=1)
+            ax_a.axhline(-ci99_eta, color='r', ls='--', lw=1,
+                         label=f'99% CI = ±{ci99_eta:.4f}')
+            ax_a.set_xlim(0, 50)
+            if col == 0:
+                tag = 'Free' if blk == 0 else 'SLD'
+                ax_a.set_ylabel(f'{tag} — $C_\\eta(k)$')
+            ax_a.grid(True, alpha=0.3)
+            # y-limits: symmetric, auto-scaled
+            ymax = max(0.01, 1.3 * np.max(np.abs(eta_ac[1:])))
+            ax_a.set_ylim(-min(ymax, 1.0), min(ymax, 1.0))
+            if row_ac < 3:
+                ax_a.set_xticklabels([])
+            else:
+                ax_a.set_xlabel('Lag $k$')
+            ax_a.legend(fontsize=6, loc='upper right')
 
-    # ── Figure 2: Autocorrelation at 10 GHz ──────────────────────────
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    save_fig(fig1, f'{out}/sim_phase_randomisation.png')
+
+    # ── Figure 2: Phase autocorrelation (selected cases) ─────────────
 
     fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
     fig2.suptitle(
@@ -333,7 +386,7 @@ if __name__ == '__main__':
 
     # ── Part 2: Injection-power sweep at 10 GHz ─────────────────────
 
-    N_PULSES_SWEEP = 200_000
+    N_PULSES_SWEEP = 1_000_000
     P_sld_sweep = np.array([0, 1, 2, 3, 5, 8, 10, 13, 16, 19, 22, 25, 30])
 
     print(f"\n  Part 2: Injection-power sweep at 10 GHz "
@@ -587,7 +640,7 @@ if __name__ == '__main__':
     for P_mW in P_fine:
         S_inj = sld_power_to_sinj(P_mW, laser)
         seed = 50000 + int(P_mW * 100)
-        r = run_config(laser, 10e9, S_inj, 100_000, seed=seed)
+        r = run_config(laser, 10e9, S_inj, 1_000_000, seed=seed)
         r1_fine.append(r['r1'])
         jitter_fine.append(r['sigma_t'] * 1e12)
 
@@ -595,7 +648,7 @@ if __name__ == '__main__':
     jitter_fine = np.array(jitter_fine)
 
     # Find threshold: where r1 drops below 99% CI
-    ci99_100k = autocorr_ci(100_000, 0.99)
+    ci99_100k = autocorr_ci(1_000_000, 0.99)
     threshold_idx = np.where(r1_fine < ci99_100k)[0]
     P_threshold = P_fine[threshold_idx[0]] if len(threshold_idx) > 0 else P_fine[-1]
 
@@ -659,6 +712,226 @@ if __name__ == '__main__':
     plt.tight_layout()
     save_fig(fig5, f'{out}/mechanism_decomposition.png')
 
+    # ── Part 5: Detection chain — AMZI output: true vs measured ──────
+    # The experiment measures AMZI splitting ratio η, not raw pulse power.
+    # Apply detection chain to each AMZI port (I_A, I_B) independently,
+    # then recompute η from the detected signals.
+    # Stages per port: hangover (ISI) → electronic noise → truncation → quantisation
+
+    from scipy.signal import lfilter
+
+    print(f"\n  Part 5: Detection chain — AMZI splitting ratio")
+
+    # Detection parameters
+    DET_BW_GHZ = 40.0          # PD 3-dB bandwidth (GHz)
+    PD_RESP = 0.8               # InGaAs PIN responsivity at 1547 nm (A/W)
+    R_LOAD = 50.0               # load impedance (Ω)
+    SCOPE_ENOB = 5.5            # effective number of bits at 10 GHz input
+    SCOPE_VPP = 0.5             # full-scale voltage (V)
+    OPT_ATTN_DB = 10.0          # optical attenuator before AMZI (dB)
+    TAIL_FRAC = 0.03            # detector diffusion tail amplitude
+    TAU_TAIL_PS = 100.0         # tail decay constant (ps)
+    I_DARK = 10e-9              # dark current (A)
+    T_NOISE = 300.0             # noise temperature (K)
+
+    BW_det = DET_BW_GHZ * 1e9
+    k_B = 1.381e-23
+    opt_attn_lin = 10**(-OPT_ATTN_DB / 10)
+
+    def detect_amzi(pk_P, pk_phi, f_rep, enob=SCOPE_ENOB, seed=54321):
+        """Apply detection chain to AMZI output and return true/measured η."""
+        T_rep = 1.0 / f_rep
+        tau_tail = TAU_TAIL_PS * 1e-12
+        alpha_ho = TAIL_FRAC * np.exp(-T_rep / tau_tail)
+
+        n_lev = 2**enob
+        lsb = SCOPE_VPP / n_lev
+
+        # True AMZI outputs (optical)
+        I_A, I_B, eta_true = amzi_outputs(pk_P, pk_phi)
+        N = len(I_A)
+
+        # Attenuate before detection
+        I_A_opt = I_A * opt_attn_lin
+        I_B_opt = I_B * opt_attn_lin
+
+        rng = np.random.default_rng(seed)
+        detected = {}
+        for label, P_opt in [('A', I_A_opt), ('B', I_B_opt)]:
+            I_ph = PD_RESP * P_opt
+            V_sig = I_ph * R_LOAD
+
+            # Hangover
+            V = lfilter([1.0], [1.0, -alpha_ho], V_sig)
+
+            # Electronic noise
+            sigma_shot = np.sqrt(
+                2 * q * np.maximum(I_ph, 0) * BW_det) * R_LOAD
+            sigma_th = np.sqrt(4 * k_B * T_NOISE * BW_det * R_LOAD)
+            sigma_dk = np.sqrt(2 * q * I_DARK * BW_det) * R_LOAD
+            sigma_e = np.sqrt(sigma_shot**2 + sigma_th**2 + sigma_dk**2)
+            V = V + sigma_e * rng.standard_normal(N)
+
+            # Truncation + quantisation
+            V = np.clip(V, 0, SCOPE_VPP)
+            V = np.floor(V / lsb) * lsb + lsb / 2
+
+            detected[label] = V
+
+        # Measured splitting ratio from detected voltages
+        V_total = detected['A'] + detected['B']
+        eta_meas = np.where(V_total > 0, detected['A'] / V_total, 0.5)
+
+        return eta_true, eta_meas, alpha_ho
+
+    # Two test cases: 1 GHz free (reference) and 10 GHz + SLD
+    cases = [
+        ('1 GHz free', '1 GHz_free', 1e9),
+        ('10 GHz + SLD', '10 GHz_sld', 10e9),
+    ]
+
+    det_data = {}
+    for case_name, key, f_rep in cases:
+        r = results[key]
+        eta_true, eta_meas, alpha_ho = detect_amzi(
+            r['pk_P'], r['pk_phi'], f_rep)
+
+        # Autocorrelation of splitting ratio
+        def _eta_ac(arr, max_k=50):
+            c = arr - np.mean(arr)
+            v = np.var(arr)
+            if v < 1e-30:
+                return np.zeros(max_k)
+            ac_arr = np.empty(max_k)
+            ac_arr[0] = 1.0
+            for k in range(1, max_k):
+                ac_arr[k] = np.mean(c[k:] * c[:-k]) / v
+            return ac_arr
+
+        ac_true = _eta_ac(eta_true)
+        ac_meas = _eta_ac(eta_meas)
+        ci99_eta = 2.576 / np.sqrt(len(eta_true))
+
+        det_data[case_name] = dict(
+            eta_true=eta_true, eta_meas=eta_meas,
+            ac_true=ac_true, ac_meas=ac_meas,
+            ci99=ci99_eta, alpha_ho=alpha_ho,
+        )
+
+        print(f"    {case_name}:")
+        print(f"      Hangover α = {alpha_ho:.6f} "
+              f"({alpha_ho*100:.4f}%)")
+        print(f"      η autocorrelation C(1): "
+              f"true = {ac_true[1]:+.6f}, "
+              f"measured = {ac_meas[1]:+.6f}, "
+              f"99%CI = ±{ci99_eta:.6f}")
+
+    # ── ENOB sensitivity sweep (10 GHz + SLD) ─────────────────────────
+    enob_sweep = np.arange(3.0, 8.5, 0.5)
+    ac1_vs_enob = np.empty(len(enob_sweep))
+    r_sld = results['10 GHz_sld']
+    for i, enob_val in enumerate(enob_sweep):
+        _, eta_m, _ = detect_amzi(
+            r_sld['pk_P'], r_sld['pk_phi'], 10e9,
+            enob=enob_val, seed=54321)
+        c = eta_m - np.mean(eta_m)
+        v = np.var(eta_m)
+        ac1_vs_enob[i] = np.mean(c[1:] * c[:-1]) / v if v > 1e-30 else 0.0
+
+    print(f"    ENOB sweep (10 GHz + SLD): "
+          f"{enob_sweep[0]:.1f}–{enob_sweep[-1]:.1f} bits")
+    for enob_val, ac1_val in zip(enob_sweep, ac1_vs_enob):
+        flag = ' *' if abs(ac1_val) > det_data['10 GHz + SLD']['ci99'] else ''
+        print(f"      ENOB={enob_val:.1f}: C_η(1) = {ac1_val:+.6f}{flag}")
+
+    # ── Figure 6: Detection chain on AMZI splitting ratio ────────────
+
+    eta_th = np.linspace(0.001, 0.999, 500)
+    arcsine_pdf = 1.0 / (np.pi * np.sqrt(eta_th * (1.0 - eta_th)))
+
+    fig6, axes6 = plt.subplots(2, 2, figsize=(14, 10))
+    fig6.suptitle(
+        'Detection Chain Effect on AMZI Splitting Ratio\n'
+        f'InGaAs PD ({DET_BW_GHZ:.0f} GHz), '
+        f'ENOB = {SCOPE_ENOB:.1f} bits at 10 GHz, '
+        f'{OPT_ATTN_DB:.0f} dB attn, '
+        f'tail = {TAIL_FRAC*100:.0f}%/τ = {TAU_TAIL_PS:.0f} ps',
+        fontsize=13)
+
+    # (a) η distribution — 1 GHz free (reference)
+    ax = axes6[0, 0]
+    d = det_data['1 GHz free']
+    ax.hist(d['eta_true'], bins=200, density=True, alpha=0.5,
+            color='C0', label='True $\\eta$')
+    ax.hist(d['eta_meas'], bins=200, density=True, alpha=0.5,
+            color='C3', label='Measured $\\eta$')
+    ax.plot(eta_th, arcsine_pdf, 'k--', lw=1.2, alpha=0.6,
+            label='Arcsine (ideal)')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 12)
+    ax.set_xlabel('Splitting ratio $\\eta$')
+    ax.set_ylabel('Probability density')
+    ax.set_title('(a) 1 GHz free-running (reference)')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (b) η distribution — 10 GHz + SLD
+    ax = axes6[0, 1]
+    d = det_data['10 GHz + SLD']
+    ax.hist(d['eta_true'], bins=200, density=True, alpha=0.5,
+            color='C0', label='True $\\eta$')
+    ax.hist(d['eta_meas'], bins=200, density=True, alpha=0.5,
+            color='C3', label='Measured $\\eta$')
+    ax.plot(eta_th, arcsine_pdf, 'k--', lw=1.2, alpha=0.6,
+            label='Arcsine (ideal)')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 12)
+    ax.set_xlabel('Splitting ratio $\\eta$')
+    ax.set_ylabel('Probability density')
+    ax.set_title('(b) 10 GHz + SLD injection')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (c) η autocorrelation — both cases
+    ax = axes6[1, 0]
+    d1 = det_data['1 GHz free']
+    d10 = det_data['10 GHz + SLD']
+    lags_d = np.arange(len(d1['ac_true']))
+    ax.plot(lags_d[1:], d1['ac_meas'][1:], 's-', ms=3, lw=1.0,
+            color='C2', alpha=0.8, label='1 GHz free (meas.)')
+    ax.plot(lags_d[1:], d10['ac_true'][1:], 'o-', ms=3, lw=1.0,
+            color='C0', alpha=0.8, label='10 GHz+SLD (true)')
+    ax.plot(lags_d[1:], d10['ac_meas'][1:], '^-', ms=3, lw=1.0,
+            color='C3', alpha=0.8, label='10 GHz+SLD (meas.)')
+    ax.axhline(d10['ci99'], color='r', ls='--', lw=1,
+               label=f'99% CI = ±{d10["ci99"]:.5f}')
+    ax.axhline(-d10['ci99'], color='r', ls='--', lw=1)
+    ax.axhline(0, color='gray', ls='-', lw=0.5)
+    ax.set_xlabel('Lag $k$')
+    ax.set_ylabel('$\\eta$ autocorrelation $C_\\eta(k)$')
+    ax.set_title('(c) $\\eta$ autocorrelation')
+    ax.legend(fontsize=7, loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, 50)
+
+    # (d) ENOB sensitivity — lag-1 η autocorrelation vs ENOB
+    ax = axes6[1, 1]
+    ax.plot(enob_sweep, ac1_vs_enob, 'o-', ms=5, lw=1.5, color='C0')
+    ax.axhline(d10['ci99'], color='r', ls='--', lw=1,
+               label=f'99% CI = ±{d10["ci99"]:.5f}')
+    ax.axhline(-d10['ci99'], color='r', ls='--', lw=1)
+    ax.axhline(0, color='gray', ls='-', lw=0.5)
+    ax.axvline(SCOPE_ENOB, color='green', ls=':', lw=1.5,
+               label=f'Nominal ({SCOPE_ENOB:.1f} bits)')
+    ax.set_xlabel('ENOB (bits)')
+    ax.set_ylabel('Lag-1 $\\eta$ autocorrelation $C_\\eta(1)$')
+    ax.set_title('(d) ENOB sensitivity (10 GHz + SLD)')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    save_fig(fig6, f'{out}/detection_chain.png')
+
     # ── Summary table ────────────────────────────────────────────────
 
     print("\n" + "=" * 70)
@@ -711,6 +984,143 @@ if __name__ == '__main__':
         sim_total = np.sqrt(sim_opt**2 + sigma_elec**2)
         print(f"    {P_mW:12.0f}  {exp_jitter:11.1f}ps  "
               f"{sim_opt:13.1f}ps  {sim_total:11.1f}ps")
+
+    # ── Save all data for replotting ────────────────────────────────
+
+    import json
+
+    data_dir = f'{out}/data'
+    import os
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Part 1: frequency sweep — per-config scalars + autocorrelation
+    freq_sweep_data = {}
+    for f_rep, flabel in zip(freqs, freq_labels):
+        for inj_label in ['free', 'sld']:
+            key = f'{flabel}_{inj_label}'
+            r = results[key]
+            freq_sweep_data[key] = dict(
+                r1=float(r['r1']),
+                kl=float(r['kl']),
+                ks_stat=float(r['ks_stat']),
+                sigma_t_ps=float(r['sigma_t'] * 1e12),
+                cv_P=float(r['cv_P']),
+                mean_P_mW=float(r['mean_P'] * 1e3),
+            )
+    np.savez_compressed(
+        f'{data_dir}/freq_sweep.npz',
+        freqs_ghz=np.array([f * 1e-9 for f in freqs]),
+        freq_labels=np.array(freq_labels),
+        **{f'{k}_autocorr': results[k]['autocorr']
+           for k in results if 'GHz' in k},
+        **{f'{k}_eta': results[k]['eta']
+           for k in results if 'GHz' in k},
+    )
+    with open(f'{data_dir}/freq_sweep_scalars.json', 'w') as f:
+        json.dump(freq_sweep_data, f, indent=2)
+
+    # Part 2: injection-power sweep arrays
+    np.savez_compressed(
+        f'{data_dir}/power_sweep.npz',
+        **{k: v for k, v in sweep.items()},
+    )
+
+    # Part 3: optical spectra
+    for key, sd in spec_data.items():
+        np.savez_compressed(
+            f'{data_dir}/spectrum_{key.replace(" ", "_")}.npz',
+            freq_hz=sd['freq'],
+            spectrum_raw=sd['spectrum'],
+            spectrum_filtered=sd['spectrum_filtered'],
+            f_rep=sd['f_rep'],
+            filter_bw_hz=sd['filter_bw_hz'],
+            dt=sd['dt'],
+        )
+
+    # Part 4: mechanism decomposition
+    np.savez_compressed(
+        f'{data_dir}/mechanism.npz',
+        P_fine_mW=P_fine,
+        r1_fine=r1_fine,
+        jitter_fine_ps=jitter_fine,
+        P_threshold_mW=P_threshold,
+        ci99=ci99_100k,
+    )
+
+    # Part 5: detection chain (AMZI splitting ratio)
+    for case_name, d in det_data.items():
+        safe_name = case_name.replace(' ', '_').replace('+', 'plus')
+        np.savez_compressed(
+            f'{data_dir}/detection_{safe_name}.npz',
+            eta_true=d['eta_true'],
+            eta_meas=d['eta_meas'],
+            ac_true=d['ac_true'],
+            ac_meas=d['ac_meas'],
+            ci99=d['ci99'],
+            alpha_ho=d['alpha_ho'],
+        )
+    np.savez_compressed(
+        f'{data_dir}/detection_enob_sweep.npz',
+        enob=enob_sweep,
+        ac1_vs_enob=ac1_vs_enob,
+    )
+
+    # Parameters JSON
+    params = dict(
+        laser=dict(
+            lambda0_nm=laser.lambda0 * 1e9,
+            L_um=laser.L * 1e6,
+            tau_p_ps=laser.tau_p * 1e12,
+            I_th_mA=I_th * 1e3,
+            V_m3=laser.V,
+        ),
+        drive=dict(
+            I_DC_mA=I_DC * 1e3,
+            V_RF_amp_V=V_RF_AMP,
+            Z_match_ohm=Z_MATCH,
+            I_RF_mA=I_RF * 1e3,
+            waveform='sinusoidal',
+        ),
+        sld=dict(
+            P_main_mW=P_sld_main,
+            acceptance_bw_nm=8.0,
+            sld_bw_nm=33.0,
+            coupling_loss=0.5,
+        ),
+        filter=dict(
+            bw_nm=FILTER_BW_NM,
+            bw_ghz=float(filter_bw_GHz),
+            location='output_detection_path',
+        ),
+        detection=dict(
+            det_bw_ghz=DET_BW_GHZ,
+            pd_responsivity_AW=PD_RESP,
+            R_load_ohm=R_LOAD,
+            scope_enob=SCOPE_ENOB,
+            scope_vpp_V=SCOPE_VPP,
+            opt_attn_dB=OPT_ATTN_DB,
+            tail_frac=TAIL_FRAC,
+            tau_tail_ps=TAU_TAIL_PS,
+            dark_current_A=I_DARK,
+            T_noise_K=T_NOISE,
+        ),
+        simulation=dict(
+            N_pulses_sweep=int(N_PULSES),
+            N_pulses_power_sweep=int(N_PULSES_SWEEP),
+            dt_target_ps=DT_TARGET * 1e12,
+            sigma_elec_ps=sigma_elec,
+        ),
+    )
+    with open(f'{data_dir}/parameters.json', 'w') as f:
+        json.dump(params, f, indent=2)
+
+    print(f"\n  Data saved to {data_dir}/")
+    print(f"    freq_sweep.npz, freq_sweep_scalars.json")
+    print(f"    power_sweep.npz")
+    print(f"    spectrum_*.npz  (×{len(spec_data)})")
+    print(f"    mechanism.npz")
+    print(f"    detection_*.npz  (×{len(det_data)})")
+    print(f"    parameters.json")
 
     print("\n" + "=" * 70)
     print("  Done. Figures saved to images/paper_10ghz/")

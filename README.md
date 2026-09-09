@@ -205,6 +205,21 @@ fiber/hybrid_crosstalk.py  HybridCrosstalkPropagator: the first propagator in fi
                           the one piece of physics a pure power-domain (XPM/Raman) comparison cannot
                           give, and the reason this module exists: a phase-encoded protocol's
                           receiver measures exactly this relative phase.
+fiber/receiver_leakage.py  filter_leakage_photons(): a distinct, LINEAR, post-fiber mechanism from
+                          everything else in fiber/ -- direct, un-shifted classical-carrier power
+                          reaching the detector because a receive filter's real-world rejection
+                          FLOOR (set by back-reflections, coating imperfections, secondary leakage
+                          paths) is finite, not the (much steeper, but non-indefinite) roll-off
+                          slope quoted near the passband edge. Converts a classical channel's
+                          launch power, attenuated over the actual fiber length via that channel's
+                          own per-mode fiber.alpha, into photons/gate at the QKD wavelength, given
+                          an assumed or measured floor isolation. required_floor_dB() inverts this:
+                          given a target noise budget, how much floor isolation is needed.
+                          Independent of spatial mode by construction (this leakage happens in the
+                          wavelength domain, downstream of the fiber) -- diagnostically useful when
+                          spatial-mode diversity measurably fails to reduce classical-channel noise,
+                          since that rules out mode-overlap-mediated mechanisms (Raman/XPM crosstalk)
+                          as the dominant cause and points at this one instead.
 ```
 
 Validated in `tests/test_fiber_engine.py` against four independent physics checks: GVD-only Gaussian broadening vs the analytic formula, fundamental-soliton shape recurrence after one soliton period, Raman-induced soliton self-frequency shift (redshift), and spontaneous-Raman noise correctly vanishing on the anti-Stokes side as T->0. See `studies/raman_fiber_study.py` for a worked example (SSFS across fiber types; Stokes/anti-Stokes noise vs temperature).
@@ -227,9 +242,14 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 
 `tests/test_brillouin.py` validates the SBS solver against the textbook threshold picture: negligible SBS-specific pump depletion well below the analytic threshold, ~10% depletion right at threshold rising to >65% well above it (with reflectivity climbing from ~1e-8 to ~0.65 in between), reflectivity collapsing by 9 orders of magnitude when detuned 10 linewidths off resonance, and exact conservation (to 1e-15) of the net one-way photon flux `P_pump(z)-P_stokes(z)` for a lossless fiber. Two real bugs were caught and fixed while building this: a missing `1/A_eff` factor converting the standard tabulated (intensity-based) `g_B` into the power-based coupled equations, and a sign-convention mismatch feeding WDM channel separations into `raman_gain_spectrum` (whose `Omega` argument follows `physical_freq = omega0 - Omega`, opposite to the direct channel-offset convention).
 
-`tests/test_hybrid_crosstalk.py` validates `HybridCrosstalkPropagator` against both propagators it combines: with `qkd_mode == bright_mode` (no real spatial separation), it reproduces `WDMPropagator`'s output exactly (<2e-9 relative error, including the absolute inter-channel/inter-mode phase term) and `QuantumWDMPropagator`'s ensemble-averaged noise floor statistically (ratio 0.97, within sampling error over 20 realizations); the deterministic Raman crosstalk coefficient vanishes exactly at zero channel separation (`raman_gain_spectrum`'s `Im(H_R)=0` at `Omega=0`); and `gamma_cross` matches `MultimodeFiberParams.gamma_matrix[qkd,bright]` directly. Three real bugs were caught and fixed while building this: a sign error in the channel-offset argument passed to `raman_gain_spectrum` (same class of bug as the one caught in `test_brillouin.py`), a completely missing absolute inter-field phase (`delta_beta0`) term -- the one piece of physics this module exists to add -- and a noise-generation bug where the cross-field term used peak power + frequency-domain shaping (correct for the *intramodal* term) instead of `QuantumWDMPropagator`'s local-instantaneous-power + time-domain white-noise recipe (correct for a *fixed-separation* term); all three were caught by comparing directly against the limiting-case propagators rather than by inspecting the formulas.
+`tests/test_hybrid_crosstalk.py` validates `HybridCrosstalkPropagator` against both propagators it combines: with `qkd_mode == bright_mode` (no real spatial separation), it reproduces `WDMPropagator`'s output exactly (<2e-9 relative error, including the absolute inter-channel/inter-mode phase term) and `QuantumWDMPropagator`'s ensemble-averaged noise floor statistically (ratio 0.97, within sampling error over 20 realizations); the deterministic Raman crosstalk coefficient vanishes exactly at zero channel separation (`raman_gain_spectrum`'s `Im(H_R)=0` at `Omega=0`); and `gamma_cross` matches `MultimodeFiberParams.gamma_matrix[qkd,bright]` directly. Three real bugs were caught and fixed while building this: a sign error in the channel-offset argument passed to `raman_gain_spectrum` (same class of bug as the one caught in `test_brillouin.py`), a completely missing absolute inter-field phase (`delta_beta0`) term -- the one piece of physics this module exists to add -- and a noise-generation bug where the cross-field term used peak power + frequency-domain shaping (correct for the *intramodal* term) instead of `QuantumWDMPropagator`'s local-instantaneous-power + time-domain white-noise recipe (correct for a *fixed-separation* term); all three were caught by comparing directly against the limiting-case propagators rather than by inspecting the formulas. `HybridCrosstalkPropagator` also gained an optional `launch_extinction_dB` parameter modeling a mode-selective launch device's (e.g. photonic lantern) finite mode extinction: a fraction of the nominal bright-mode launch power appears directly in the QKD's own mode at z=0, using the FULL same-mode gamma (not the weaker gamma_cross) since it now occupies that waveguide -- validated by two checks: a huge extinction value reproduces the no-leak baseline exactly, and (the more interesting identity) with `qkd_mode == bright_mode` and `launch_extinction_dB=0` (leak field an exact power-for-power copy of bright), the deterministic Raman-crosstalk GAIN FACTOR applied to the QKD field's magnitude is exactly SQUARED relative to a single-pathway run -- not doubled -- since Raman crosstalk is a purely multiplicative `exp(0.5*g_R*P*dz)` term per step and doubling the coefficient doubles the exponent.
+
+`tests/test_receiver_leakage.py` validates `fiber.receiver_leakage`: a 10 dB floor step gives exactly 10x fewer leaked photons (log-linear by construction); leaked power attenuates exactly with the classical channel's own `fiber.alpha[bright_mode]` over length; and `required_floor_dB` round-trips exactly through `filter_leakage_photons`.
 
 ---
+
+> Figure provenance for thesis sections 5.4 and 6.4 (which script draws which figure, at which
+> line, and where the numbers are stored) is in [FIGURES.md](FIGURES.md).
 
 ## Scripts and Their Purposes
 
@@ -274,6 +294,7 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 | `qkd_source_analysis.py` | Full QKD source characterisation (QBER, key rate estimates) | `images/qkd_source/` |
 | `qkd_sinj_sweep.py` | Sweep SLD injection power and measure r1 vs S_inj | `images/qkd_source/` |
 | `timing_jitter_analysis.py` | Detailed timing jitter decomposition (turn-on delay statistics) | `images/timing_jitter/` |
+| `detector_imperfections.py` | Impact of electronic noise and DC baseline offset on the single-photodiode g^(m)(0) estimator; derives and verifies the bias law (bias/excess = 10^-SNR/10), and tests the noise correction | `images/detector_imperfections/` |
 | `amzi_pulse_analysis.py` | Simulated asymmetric Mach-Zehnder interferometer measurements | `images/amzi/` |
 | `gain_switched_interference.py` | Pulse-to-pulse interference visibility (free-running) | `images/gain_switched/` |
 | `gs_injected_interference.py` | Same with SLD injection | `images/gain_switched_injection/` |
@@ -381,18 +402,25 @@ python3 -m tests.test_threshold_sweep
 - The optimisation landscape is relatively flat near the default operating point
 - Fourier parameterisation (3 harmonics, 6 parameters) gives sufficient degrees of freedom
 
-### 3. Carrier Transport (#5)
+### 3. Detector Imperfections (Chapter 6)
+- The bias of the uncorrected g^(m) estimator, as a fraction of the coherence excess, is exactly 10^(-SNR/10) for additive noise, independent of the source. The "13 dB" floor is therefore a 5% criterion.
+- Verified numerically to 0.2% median deviation at m=2; m=3 and 4 track the same law within a few percent.
+- A DC baseline offset of fraction delta inflates the excess by (1-delta)^-2, at every SNR. It does not diminish at high optical power and is NOT removed by the variance-based noise correction.
+- The correction of Eqs. (6.13)-(6.14) removes 2-4 orders of magnitude of bias; the residual grows with order.
+- Operating point bias=0.95*I_th, peak=1.6*I_th at 1 GHz reproduces the measured 19 mA source (g2/g3/g4 = 1.00057/1.00170/1.00337 against 1.0007/1.002/1.004).
+
+### 4. Carrier Transport (#5)
 - NOT the explanation for the experimental phase transition or discrepancies
 - Main effect: ~10% power penalty and extra timing jitter at tau_cap > 5 ps
 - Negligible effect on phase correlation at typical InGaAsP capture times (~1-3 ps)
 
-### 4. Fiber Propagation (#6)
+### 5. Fiber Propagation (#6)
 - Chirp compensation effect: pulses compress before broadening in anomalous dispersion regime
 - Optimal compression distance: ~5-10 km for typical chirped pulses at 1550 nm
 - SLD injection destroys chirp coherence, eliminating the compression benefit
 - After 50+ km, GVD-dominated broadening regardless of initial chirp
 
-### 5. PINN/ML Summary (#7-12)
+### 6. PINN/ML Summary (#7-12)
 - **Transfer learning works**: pre-training provides good initialisation for new devices
 - **Neural surrogates** useful for "easy" statistics (power, width) but fail on phase metrics
 - **Inverse PINNs fail** due to fundamental parameter identifiability issues from intensity-only data

@@ -136,9 +136,81 @@ def check_mode_offset_zero_noise_matches_quantum_wdm():
           f"(hybrid={m_h:.3e}, wdm={m_w:.3e}, ratio={ratio:.3f})")
 
 
+def check_launch_leak_negligible_matches_baseline():
+    """A huge launch_extinction_dB (negligible leak) must reproduce the
+    no-leak baseline output to near machine precision."""
+    mmf = make_multimode_fiber('om3', lambda0=1550e-9, D=17.0, alpha_dB_km=0.3)
+    N = 2 ** 10
+    dt = 2e-12
+    t = (np.arange(N) - N // 2) * dt
+    T0 = 40e-12
+    qkd_field = (np.sqrt(1e-9) / np.cosh(t / T0)).astype(complex)
+    bright_field = (np.sqrt(1e-3) / np.cosh(t / (5 * T0))).astype(complex)
+
+    baseline = HybridCrosstalkPropagator(mmf, qkd_mode=0, bright_mode=1,
+                                          channel_separation_Hz=200e9, include_raman=True, noise=False)
+    A_qkd_base, _ = baseline.propagate(qkd_field, bright_field, dt, L=2000.0, step_size=20.0)
+
+    leaky = HybridCrosstalkPropagator(mmf, qkd_mode=0, bright_mode=1,
+                                       channel_separation_Hz=200e9, include_raman=True, noise=False,
+                                       launch_extinction_dB=300.0)
+    A_qkd_leaky, _ = leaky.propagate(qkd_field, bright_field, dt, L=2000.0, step_size=20.0)
+
+    err = np.max(np.abs(A_qkd_leaky - A_qkd_base)) / np.max(np.abs(A_qkd_base))
+    assert err < 1e-9, f"negligible-leak mismatch: {err:.3e}"
+    print(f"check 5 OK: launch_extinction_dB=300 matches no-leak baseline (err={err:.2e})")
+
+
+def check_launch_leak_doubling_identity():
+    """With qkd_mode == bright_mode and launch_extinction_dB=0 (leak field
+    an exact power-for-power copy of the bright field, same mode), the
+    deterministic Raman-crosstalk GAIN applied to the QKD field's
+    magnitude is purely additive in the exponent (it's a multiplicative
+    exp(0.5*g_R*P*dz) factor per step) -- so doubling the crosstalk
+    coefficient must exactly SQUARE the single-pathway gain factor
+    (relative to a no-crosstalk reference), not merely double it. XPM is
+    pure phase and irrelevant to |A|, so this isolates the Raman term
+    exactly regardless of QKD launch power."""
+    mmf = make_multimode_fiber('om3', lambda0=1550e-9, D=17.0, alpha_dB_km=0.3)
+    mode = 0
+    N = 2 ** 10
+    dt = 2e-12
+    t = (np.arange(N) - N // 2) * dt
+    T0 = 40e-12
+    qkd_field = (np.sqrt(1e-9) / np.cosh(t / T0)).astype(complex)
+    bright_field = (np.sqrt(1e-3) / np.cosh(t / (5 * T0))).astype(complex)
+    zero_bright = np.zeros(N, dtype=complex)
+    separation_Hz = 200e9
+    L = 2000.0
+
+    ref = HybridCrosstalkPropagator(mmf, qkd_mode=mode, bright_mode=mode,
+                                     channel_separation_Hz=separation_Hz, include_raman=True, noise=False)
+    A_ref, _ = ref.propagate(qkd_field, zero_bright, dt, L=L, step_size=20.0)
+
+    single = HybridCrosstalkPropagator(mmf, qkd_mode=mode, bright_mode=mode,
+                                        channel_separation_Hz=separation_Hz, include_raman=True, noise=False)
+    A_single, _ = single.propagate(qkd_field, bright_field, dt, L=L, step_size=20.0)
+
+    doubled = HybridCrosstalkPropagator(mmf, qkd_mode=mode, bright_mode=mode,
+                                         channel_separation_Hz=separation_Hz, include_raman=True, noise=False,
+                                         launch_extinction_dB=0.0)
+    A_doubled, _ = doubled.propagate(qkd_field, bright_field, dt, L=L, step_size=20.0)
+
+    peak = np.argmax(np.abs(A_ref))
+    gain_single = np.abs(A_single[peak]) / np.abs(A_ref[peak])
+    gain_doubled = np.abs(A_doubled[peak]) / np.abs(A_ref[peak])
+    err = abs(gain_doubled - gain_single ** 2) / gain_single ** 2
+    assert err < 1e-6, f"gain_doubled={gain_doubled:.8f} != gain_single^2={gain_single**2:.8f} (err={err:.2e})"
+    print(f"check 6 OK: launch_extinction_dB=0 (qkd_mode==bright_mode) exactly squares "
+          f"the single-pathway Raman gain factor (gain_single={gain_single:.6f}, "
+          f"gain_doubled={gain_doubled:.6f}, gain_single^2={gain_single**2:.6f})")
+
+
 if __name__ == '__main__':
     check_mode_offset_zero_matches_wdm()
     check_zero_separation_raman_crosstalk_vanishes()
     check_gamma_cross_matches_gamma_matrix()
     check_mode_offset_zero_noise_matches_quantum_wdm()
+    check_launch_leak_negligible_matches_baseline()
+    check_launch_leak_doubling_identity()
     print("\nAll fiber.hybrid_crosstalk checks passed.")

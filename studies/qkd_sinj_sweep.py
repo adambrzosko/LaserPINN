@@ -425,3 +425,8 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("  Done.")
     print("=" * 70)
+
+    # ---- persist every array in this run so the figures can be redrawn
+    #      from disk without re-simulating (see FIGURES.md)
+    from gsdfb.io import save_run
+    save_run(locals(), 'images/qkd_source/qkd_sinj_sweep_data.npz')
