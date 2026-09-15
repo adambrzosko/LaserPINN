@@ -73,7 +73,7 @@ exact behavior validated before this feature existed.
 """
 import numpy as np
 
-from core.dfb_laser import c
+from fiber.constants import c
 from fiber.raman_response import raman_response_freq_analytic, raman_gain_spectrum
 
 hbar = 1.0545718e-34  # J.s
@@ -296,7 +296,8 @@ class HybridCrosstalkPropagator:
             if self.noise:
                 P_loc_self = np.max(P_qkd)
                 psd_self = hbar * np.abs(omega_abs_self) * self_noise_gain * P_loc_self
-                amp_self = np.sqrt(np.clip(psd_self, 0, None) * dz / dt)
+                # ifft divides by n_pts, so frequency-domain amplitudes carry sqrt(n_pts)
+                amp_self = np.sqrt(np.clip(psd_self, 0, None) * n_pts * dz / dt)
                 noise_self_f = amp_self * (self.rng.standard_normal(n_pts)
                                             + 1j * self.rng.standard_normal(n_pts)) / np.sqrt(2)
                 noise_self = np.fft.ifft(noise_self_f)

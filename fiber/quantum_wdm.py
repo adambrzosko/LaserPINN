@@ -95,7 +95,8 @@ class QuantumWDMPropagator(WDMPropagator):
         # across its own internal Omega grid
         P_loc = np.max(P, axis=1, keepdims=True)  # (N, 1)
         psd_intra = hbar * np.abs(self._intra_omega_abs) * self._intra_noise_gain[None, :] * P_loc
-        amp_intra = np.sqrt(np.clip(psd_intra, 0, None) * dz / dt)
+        # ifft divides by n_pts, so frequency-domain amplitudes carry sqrt(n_pts)
+        amp_intra = np.sqrt(np.clip(psd_intra, 0, None) * n_pts * dz / dt)
         noise_f_intra = amp_intra * (self.rng.standard_normal((N, n_pts))
                                       + 1j * self.rng.standard_normal((N, n_pts))) / np.sqrt(2)
         noise_intra = np.fft.ifft(noise_f_intra, axis=1)

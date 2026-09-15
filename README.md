@@ -220,6 +220,35 @@ fiber/receiver_leakage.py  filter_leakage_photons(): a distinct, LINEAR, post-fi
                           spatial-mode diversity measurably fails to reduce classical-channel noise,
                           since that rules out mode-overlap-mediated mechanisms (Raman/XPM crosstalk)
                           as the dominant cause and points at this one instead.
+fiber/constants.py       CODATA constants (via scipy). c is exact; fiber/ previously imported c = 3e8
+                          from core/dfb_laser.py, a 0.07% error that shifts absolute propagation
+                          constants by ~4e3 rad/m, comparable to the GRIN mode-group spacing.
+fiber/raman_models.py    Frequency-domain silica Raman responses: BlowWood (single oscillator) and
+                          LinAgrawal (2006, adds the boson peak): peak g_R 5.8e-14 m/W at 1550 nm (vs
+                          5.1e-14), and 1.4x / 2.2x more gain than Blow-Wood at 0.4 / 3 THz, where WDM
+                          channel spacings sit. gain_shape / spontaneous_shape give the FDT weights.
+fiber/grin_modes.py      Scalar LP-mode solver for alpha-profile GRIN and step-index fibres (finite-
+                          volume radial eigenproblem, Malitson Sellmeier cladding, fixed Delta n):
+                          beta_p(omega) fitted per mode over a span, guided-band masks, normalised
+                          fields, the four-index overlap tensor S_plmn and intensity overlaps S_qlql.
+                          Designs: om1, om3 (50/125, NA 0.2, alpha 2.05; shared by OM2-OM5) and smf28
+                          (effective step NA 0.115, calibrated to Corning's A_eff, D, ZDW and cutoff).
+                          OM3 at 1551.72 nm: 55 guided modes, A_eff(LP01) = 198 um^2, D = 22.1
+                          ps/nm/km, LP11-LP01 walk-off 88 ps/km. Supersedes the reduced-order
+                          parameters of multimode_fiber.py (A_eff 140 um^2, exponential overlap decay,
+                          D = 17, calibrated DMD).
+fiber/gmmnlse.py         GMMNLSE (Poletti & Horak 2008), scalar and co-polarised, RK4IP: full per-mode
+                          dispersion, loss, Kerr and Raman through S_plmn, self-steepening. A tensor
+                          term is kept when phase matched to within coherence_tol (default 0.1/dz:
+                          SPM, XPM, intermodal Raman gain, coherent coupling inside degenerate pairs;
+                          coherence_tol = inf with small dz is the complete equation) and has at most
+                          two spectator indices, a rule that preserves photon-number conservation.
+                          Spontaneous Raman noise: noise='mean' integrates the ensemble-mean PSD in every
+                          guided mode (pump spectrum convolved with the Raman kernel, no wrap-around);
+                          noise='stochastic' adds Langevin fields driven by local instantaneous pump
+                          power. Supersedes multimode_propagator.py, quantum_multimode.py and
+                          hybrid_crosstalk.py for multimode work: those used intensity-only intermodal
+                          coupling, which gives no Raman gain from a CW pump in another mode.
 ```
 
 Validated in `tests/test_fiber_engine.py` against four independent physics checks: GVD-only Gaussian broadening vs the analytic formula, fundamental-soliton shape recurrence after one soliton period, Raman-induced soliton self-frequency shift (redshift), and spontaneous-Raman noise correctly vanishing on the anti-Stokes side as T->0. See `studies/raman_fiber_study.py` for a worked example (SSFS across fiber types; Stokes/anti-Stokes noise vs temperature).
@@ -245,6 +274,12 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 `tests/test_hybrid_crosstalk.py` validates `HybridCrosstalkPropagator` against both propagators it combines: with `qkd_mode == bright_mode` (no real spatial separation), it reproduces `WDMPropagator`'s output exactly (<2e-9 relative error, including the absolute inter-channel/inter-mode phase term) and `QuantumWDMPropagator`'s ensemble-averaged noise floor statistically (ratio 0.97, within sampling error over 20 realizations); the deterministic Raman crosstalk coefficient vanishes exactly at zero channel separation (`raman_gain_spectrum`'s `Im(H_R)=0` at `Omega=0`); and `gamma_cross` matches `MultimodeFiberParams.gamma_matrix[qkd,bright]` directly. Three real bugs were caught and fixed while building this: a sign error in the channel-offset argument passed to `raman_gain_spectrum` (same class of bug as the one caught in `test_brillouin.py`), a completely missing absolute inter-field phase (`delta_beta0`) term -- the one piece of physics this module exists to add -- and a noise-generation bug where the cross-field term used peak power + frequency-domain shaping (correct for the *intramodal* term) instead of `QuantumWDMPropagator`'s local-instantaneous-power + time-domain white-noise recipe (correct for a *fixed-separation* term); all three were caught by comparing directly against the limiting-case propagators rather than by inspecting the formulas. `HybridCrosstalkPropagator` also gained an optional `launch_extinction_dB` parameter modeling a mode-selective launch device's (e.g. photonic lantern) finite mode extinction: a fraction of the nominal bright-mode launch power appears directly in the QKD's own mode at z=0, using the FULL same-mode gamma (not the weaker gamma_cross) since it now occupies that waveguide -- validated by two checks: a huge extinction value reproduces the no-leak baseline exactly, and (the more interesting identity) with `qkd_mode == bright_mode` and `launch_extinction_dB=0` (leak field an exact power-for-power copy of bright), the deterministic Raman-crosstalk GAIN FACTOR applied to the QKD field's magnitude is exactly SQUARED relative to a single-pathway run -- not doubled -- since Raman crosstalk is a purely multiplicative `exp(0.5*g_R*P*dz)` term per step and doubling the coefficient doubles the exponent.
 
 `tests/test_receiver_leakage.py` validates `fiber.receiver_leakage`: a 10 dB floor step gives exactly 10x fewer leaked photons (log-linear by construction); leaked power attenuates exactly with the classical channel's own `fiber.alpha[bright_mode]` over length; and `required_floor_dB` round-trips exactly through `filter_leakage_photons`.
+
+`tests/test_grin_modes.py` validates the mode solver: Malitson index at 1550 nm; eigenvalues of an exact infinite parabolic profile against the 2D harmonic-oscillator result (k²n₁² − β² = 2κG), with error 1.7e-5 at dr = 50 nm and second-order convergence; the parabolic LP01 effective area against 2π/κ (3.7e-6); SMF-28 against Corning's datasheet (single mode, A_eff 85.4 µm², D 16.6 ps/nm/km, still single-mode at 1270 nm); OM3 overlap symmetries (full index-permutation symmetry, the exact 1/3 LP11a/LP11b coherent ratio, azimuthal selection rules); and the dispersion fit reproducing solver β₀ to 2e-4 rad/m.
+
+`tests/test_gmmnlse.py` validates the GMMNLSE against independent limits: reduction to the split-step `FiberPropagator` for LP01 with β2/β3 and Blow-Wood Raman (1e-6 relative field difference); self-steepening peak delay 3γP₀z/ω₀ (24.67 vs 24.69 fs); exact decoupling of the circular LP11 combinations (|A±|² conserved to 1e-11, which fails if the coherent S_aabb term is wrong); CW intermodal Raman gain LP01 → LP11a against the analytic exponent (5 significant figures); the ensemble-mean spontaneous-Raman PSD against ħω g P₀ e^(−αL) L (6.6e-4) and the stochastic Langevin fields against the same (ratio 1.016 over 8 runs); and photon-number conservation with the complete 21-term three-mode tensor, Raman and self-steepening (1.3e-8).
+
+`tests/test_noise_calibration.py` checks the absolute spontaneous-Raman PSD of the single-mode `QuantumRamanPropagator` against the same analytic result (ratio 0.990). Its frequency-domain Langevin amplitudes (and those of `QuantumMultimodePropagator`, the intra-channel term of `QuantumWDMPropagator` and the self-noise term of `HybridCrosstalkPropagator`) were missing a factor √N, because `ifft` divides by N, which made that noise N times too weak (30–33 dB for the grids used). Results from `om3_raman_noise_sweep*.py` generated before the fix are affected; the time-domain inter-channel and cross-field noise terms were correct.
 
 ---
 
@@ -272,8 +307,10 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 | - | `raman_fiber_study.py` | Nonlinear fiber Raman scattering via `fiber/`: classical soliton self-frequency shift across SMF-28/HNLF/PCF, and quantum spontaneous-Raman noise (Stokes/anti-Stokes asymmetry) vs temperature | `images/raman_fiber/` |
 | - | `multimode_fiber_study.py` | Multimode (OM1-OM5) fiber via `fiber/multimode_*`: intermodal dispersion (DMD) broadening ordering across OM1-OM5, and intermodal Raman scattering (pump pulse in one mode group cross-Raman-shifting a probe pulse in another) | `images/multimode_fiber/` |
 | - | `wdm_brillouin_study.py` | WDM effects via `fiber/wdm_propagator.py`: XPM-induced chirp on a probe channel, Raman tilt across a 9-channel comb; stimulated Brillouin scattering via `fiber/brillouin.py`: the classic reflectivity/transmission threshold knee vs input power | `images/wdm_brillouin/` |
-| - | `om3_raman_noise_sweep.py` / `om3_raman_noise_sweep_pulsed.py` | Spontaneous Raman noise floor in OM3 (quasi-CW and 1 GHz/100 ps pulsed) across 12 lengths x 9 injected powers, via `fiber/quantum_multimode.py` | `images/om3_raman_noise/`, `images/om3_raman_noise_pulsed/` |
+| - | `om3_raman_noise_sweep.py` / `om3_raman_noise_sweep_pulsed.py` | Spontaneous Raman noise floor in OM3 (quasi-CW and 1 GHz/100 ps pulsed) across 12 lengths x 9 injected powers, via `fiber/quantum_multimode.py`. Superseded by `gmmnlse_raman_spectrum.py`: results saved before the √N noise fix are 30–33 dB low, the two sweeps use different grids and noise bands so their pulsed/CW ratio is not meaningful, and the pulsed run drives noise with peak power | `images/om3_raman_noise/`, `images/om3_raman_noise_pulsed/` |
 | - | `hybrid_bb84_crosstalk.py` | Combined mode+wavelength crosstalk via `fiber/hybrid_crosstalk.py`: a bright reference (quasi-CW or 1 GHz pulsed) in OM3 mode group 1 / DWDM Ch 32 vs. a phase-encoded BB84 QKD signal in mode group 0 / Ch 34 -- spontaneous Raman noise landing in the QKD frame and XPM-induced differential phase between the signal's two time bins, swept over length and bright power | `images/hybrid_bb84_crosstalk/` |
+| - | `gmmnlse_raman_spectrum.py` | Chapter 4 Raman characterisation with `fiber/gmmnlse.py` on computed OM3 modes: CW 1551.72 nm pump in LP01 at 9 mW, ensemble-mean forward PSD in all 55 guided modes at 1–17 km (LP01-only vs total, per principal group), analytic backward PSD, SMF-28 references (30 km/30 mW, 10 km/9 mW), mode table, and peak Stokes PSD vs spool length at fixed and SBS/launch-ceiling-limited power. Plotted by the Chapter 4 cells of `replot_paper_10ghz.ipynb` | `images/gmmnlse_raman_spectrum/` (data in `data/`) |
+| - | `gmmnlse_coexistence.py` | Chapter 4 coexistence noise with `fiber/gmmnlse.py`: −30 dBm Ch30 classical channel in LP11b plus its 15 dB lantern leak into LP01, mean spontaneous-Raman photons per gate at the Ch34/LP01 QKD channel (0.05 nm filter, 500 ps gate) via overlap and via leak, XPM phase on the QKD tone, and the receiver-filter-leakage QBER maps (`Sim_QBER_vs_FilterFloor`, `Sim_QBER_vs_Length_Floors`) | `images/gmmnlse_coexistence/` (data in `data/`) |
 
 ### PINN / Machine Learning Studies (Recommendations #7-12)
 

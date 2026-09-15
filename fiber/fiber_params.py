@@ -8,7 +8,7 @@ dispersion/loss numbers into the derived quantities the propagator needs
 import numpy as np
 from dataclasses import dataclass, field
 
-from core.dfb_laser import c
+from fiber.constants import c
 from fiber.materials import FiberMaterial, make_material
 from fiber.geometry import FiberGeometry, make_geometry
 

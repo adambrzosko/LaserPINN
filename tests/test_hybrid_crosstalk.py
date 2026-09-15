@@ -14,7 +14,7 @@ the two mechanisms it was built by combining:
 """
 import numpy as np
 
-from core.dfb_laser import c
+from fiber.constants import c
 from fiber.multimode_fiber import make_multimode_fiber
 from fiber.fiber_params import FiberParams
 from fiber.wdm_propagator import WDMPropagator

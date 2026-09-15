@@ -104,7 +104,7 @@ inside the per-step split-step loop.
 import numpy as np
 from dataclasses import dataclass, field
 
-from core.dfb_laser import c
+from fiber.constants import c
 from fiber.materials import FiberMaterial, make_material
 
 KAPPA_FLOOR = 1.0   # calibration constant for the alpha=2 "floor" delay term (see module docstring)

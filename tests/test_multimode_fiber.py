@@ -259,7 +259,8 @@ print("   PASS (per-mode loss is referenced correctly, ordered by grade, and man
 print("\n6. Per-mode waveguide dispersion (beta2/beta3):")
 
 fiber_disp = make_multimode_fiber('om1', D=17.0, alpha_dB_km=0.0)
-beta2_material = -fiber_disp.D * 1e-6 * fiber_disp.lambda0 ** 2 / (2 * np.pi * 3e8)
+from fiber.constants import c as c_exact
+beta2_material = -fiber_disp.D * 1e-6 * fiber_disp.lambda0 ** 2 / (2 * np.pi * c_exact)
 assert abs(fiber_disp.beta2[0] - beta2_material) / abs(beta2_material) < 1e-10, \
     "Mode 0's beta2 should exactly equal the scalar material dispersion"
 assert fiber_disp.beta3[0] == fiber_disp.beta3_material, \
@@ -299,7 +300,7 @@ print("   PASS (per-mode beta2/beta3 are referenced correctly, nonzero, and mani
 print("\n7. Absolute inter-mode phase (beta0):")
 
 from fiber.multimode_fiber import _beta0, _tau_over_L
-from core.dfb_laser import c as c_light  # must match the c used internally by _beta0/_tau_over_L
+from fiber.constants import c as c_light  # must match the c used internally by _beta0/_tau_over_L
                                           # exactly -- any mismatch gets catastrophically amplified
                                           # when subtracting the huge n1/c baseline below
 

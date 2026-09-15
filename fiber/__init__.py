@@ -22,6 +22,9 @@ core.dfb_laser / core.million_pulse_comparison / core.sld_injection.
     from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
     from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
     from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
+    from fiber.raman_models import BlowWood, LinAgrawal
+    from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
+    from fiber.gmmnlse import GMMNLSE, PropagationResult, TimeGrid
 
 Quick start
 -----------
@@ -158,3 +161,6 @@ from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneou
 from fiber.rayleigh_backscatter import rayleigh_backscatter_power, rayleigh_otdr_trace
 from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
 from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
+from fiber.raman_models import BlowWood, LinAgrawal
+from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
+from fiber.gmmnlse import GMMNLSE, PropagationResult, TimeGrid

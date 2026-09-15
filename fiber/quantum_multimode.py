@@ -91,7 +91,8 @@ class QuantumMultimodePropagator(MultimodeFiberPropagator):
 
         psd = (hbar * np.abs(self._omega_abs)[None, :] * self._weighted_shape[None, :]
                * coupled_power[:, None])  # (M, n_pts)
-        amp = np.sqrt(np.clip(psd, 0, None) * dz / dt)
+        # ifft divides by n_pts, so frequency-domain amplitudes carry sqrt(n_pts)
+        amp = np.sqrt(np.clip(psd, 0, None) * n_pts * dz / dt)
         noise_f = amp * (self.rng.standard_normal((M, n_pts))
                           + 1j * self.rng.standard_normal((M, n_pts))) / np.sqrt(2)
         return np.fft.ifft(noise_f, axis=1)

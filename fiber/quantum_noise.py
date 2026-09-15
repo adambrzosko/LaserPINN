@@ -27,15 +27,13 @@ Approximation
 The noise generated at each step is driven by the *local instantaneous
 peak power* of the field (a quasi-CW / undepleted-pump approximation),
 not a full convolution with the pump's own time-varying spectrum. This
-keeps the model tractable and reproduces the correct qualitative physics
-(temperature dependence, gain/loss-band asymmetry, scaling with local
-power and with the classical Raman gain spectrum) but the absolute
-noise-photon calibration is not independently verified here -- check it
-against a measured spontaneous Raman scattering cross-section for your
-fiber before using this for absolute photon-count predictions (e.g. a
-Raman-crosstalk noise floor for a quantum channel co-propagating with a
-classical channel). A rigorous multimode treatment would use
-Drummond & Corney-style quantum stochastic equations instead.
+keeps the model tractable and is correct for a CW or quasi-CW pump
+(temperature dependence, gain/loss-band asymmetry, scaling with power and
+with the Raman gain spectrum); the absolute noise PSD is checked against
+the analytic forward spontaneous-Raman result in
+tests/test_noise_calibration.py. For pulsed pumps the peak-power driver
+spreads peak-level noise across the whole window and overstates the total;
+use fiber.gmmnlse with noise='stochastic' (time-local driver) instead.
 
     from fiber.quantum_noise import QuantumRamanPropagator, ensemble_propagate
 """
@@ -78,7 +76,8 @@ class QuantumRamanPropagator(FiberPropagator):
         if P_loc <= 0:
             return 0.0
         psd = hbar * np.abs(self._omega_abs) * self._noise_gain * P_loc
-        amp = np.sqrt(np.clip(psd, 0, None) * dz / dt)
+        # ifft divides by n_pts, so frequency-domain amplitudes carry sqrt(n_pts)
+        amp = np.sqrt(np.clip(psd, 0, None) * n_pts * dz / dt)
         noise_f = amp * (self.rng.standard_normal(n_pts)
                           + 1j * self.rng.standard_normal(n_pts)) / np.sqrt(2)
         return np.fft.ifft(noise_f)
