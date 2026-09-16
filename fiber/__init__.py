@@ -24,7 +24,7 @@ core.dfb_laser / core.million_pulse_comparison / core.sld_injection.
     from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
     from fiber.raman_models import BlowWood, LinAgrawal
     from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
-    from fiber.gmmnlse import GMMNLSE, PropagationResult, TimeGrid
+    from fiber.gmmnlse import GMMNLSE, ModeCoupling, ModeLoss, PropagationResult, TimeGrid
 
 Quick start
 -----------
@@ -163,4 +163,4 @@ from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
 from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
 from fiber.raman_models import BlowWood, LinAgrawal
 from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
-from fiber.gmmnlse import GMMNLSE, PropagationResult, TimeGrid
+from fiber.gmmnlse import GMMNLSE, ModeCoupling, ModeLoss, PropagationResult, TimeGrid

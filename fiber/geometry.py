@@ -28,7 +28,10 @@ class FiberGeometry:
 
 
 GEOMETRIES = {
-    'smf28':         FiberGeometry(profile='step_index', core_radius=4.1e-6, NA=0.14, A_eff=80e-12),
+    # A_eff 85 um^2 is Corning's datasheet value at 1550 nm, reproduced independently by
+    # fiber.grin_modes (85.4 um^2); it was 80e-12 here, a 6% error in gamma. NA 0.14 is the
+    # far-field datasheet figure -- the equivalent index-step NA is 0.115 (see grin_modes).
+    'smf28':         FiberGeometry(profile='step_index', core_radius=4.1e-6, NA=0.14, A_eff=85e-12),
     'dcf':           FiberGeometry(profile='step_index', core_radius=2.3e-6, NA=0.20, A_eff=22e-12),
     'hnlf':          FiberGeometry(profile='step_index', core_radius=1.6e-6, NA=0.28, A_eff=11e-12),
     'pcf_smallcore': FiberGeometry(profile='pcf', core_radius=1.0e-6, NA=0.40, A_eff=3e-12),

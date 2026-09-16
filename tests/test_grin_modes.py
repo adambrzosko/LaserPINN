@@ -120,6 +120,34 @@ def check_smf28_lp11_cutoff():
     print(f'LP11 cutoff OK: {lam_c * 1e9:.1f} nm vs V = 2.405 at {expected * 1e9:.1f} nm')
 
 
+def check_mode_fields():
+    """The 2D field sampler: unit power over a box, orthogonal between distinct modes, and
+    carrying the structure the LP label claims (2l azimuthal sign changes, m radial maxima)."""
+    m = FibreModes(DESIGNS['om3'], LAM, span_Hz=5e12)
+    g = np.linspace(-50e-6, 50e-6, 501)
+    X, Y = np.meshgrid(g, g)
+    dA = (g[1] - g[0]) ** 2
+    for label in ['LP01', 'LP02', 'LP11a', 'LP21a']:
+        psi = m.field(m.index_of(label), X, Y)
+        assert abs(np.sum(psi ** 2) * dA - 1) < 5e-3, (label, np.sum(psi ** 2) * dA)
+    a = m.field(m.index_of('LP11a'), X, Y)
+    b = m.field(m.index_of('LP11b'), X, Y)
+    assert abs(np.sum(a * b) * dA) < 1e-9, np.sum(a * b) * dA
+
+    phi = np.linspace(0, 2 * np.pi, 1024, endpoint=False)
+    for label, l in [('LP01', 0), ('LP11a', 1), ('LP21a', 2), ('LP31a', 3)]:
+        p = m.index_of(label)
+        r, R = m.radial_profile(p)
+        r_peak = r[np.argmax(R ** 2)]
+        ring = m.field(p, r_peak * np.cos(phi), r_peak * np.sin(phi))
+        sign_changes = np.count_nonzero(np.diff(np.sign(ring), append=np.sign(ring[0])))
+        assert sign_changes == 2 * l, (label, sign_changes)
+    assert m.principal_group(m.index_of('LP01')) == 1
+    assert m.principal_group(m.index_of('LP21a')) == 3 == m.principal_group(m.index_of('LP02'))
+    print('mode fields OK: unit-power sampling, LP11a/LP11b orthogonal, 2l azimuthal sign '
+          'changes for l = 0..3, group number 2m + l - 1')
+
+
 if __name__ == '__main__':
     check_silica_index()
     check_parabola_eigenvalues()
@@ -128,4 +156,5 @@ if __name__ == '__main__':
     check_smf28_lp11_cutoff()
     check_om3_overlaps()
     check_dispersion_fit()
+    check_mode_fields()
     print('\nAll fiber.grin_modes checks passed.')

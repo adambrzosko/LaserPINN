@@ -6,8 +6,7 @@ Fiber material models: nonlinear index and Raman response.
 import numpy as np
 from dataclasses import dataclass
 
-hbar = 1.0545718e-34   # J.s
-kB = 1.380649e-23      # J/K
+from fiber.constants import hbar, kB
 
 
 @dataclass

@@ -31,12 +31,20 @@ All analysis scripts import from these core modules.
 ```
 fiber/materials.py       FiberMaterial dataclass + make_material(); Raman response (Blow-Wood damped-
                           oscillator model), phonon occupation (Bose-Einstein)
-fiber/geometry.py        FiberGeometry dataclass + make_geometry(); sets A_eff (drives gamma)
+fiber/geometry.py        FiberGeometry dataclass + make_geometry(); sets A_eff (drives gamma).
+                          smf28 A_eff is 85 um^2 (Corning's datasheet at 1550 nm, and what
+                          grin_modes computes independently: 85.4); it was 80e-12, a 6% error in
+                          gamma for every legacy-stack result. NA 0.14 is the far-field datasheet
+                          figure -- the equivalent index-step NA is 0.115, as used by grin_modes.
 fiber/fiber_params.py    FiberParams dataclass + make_fiber('smf28'|'dcf'|'hnlf'|
                           'pcf_supercontinuum'|'chalcogenide_waveguide') factory; combines
                           material+geometry+published D/alpha/beta3 into derived alpha/beta2/gamma
 fiber/raman_response.py  Analytic frequency-domain Raman response H_R(Omega); classical stimulated-
-                          Raman gain spectrum g_R(Omega)
+                          Raman gain spectrum g_R(Omega). This is the single-oscillator Blow-Wood
+                          model (f_R = 0.18) used by every legacy propagator; raman_models.LinAgrawal
+                          (f_R = 0.245, with the boson peak) is what gmmnlse uses. They agree to 12%
+                          at the 13.2 THz peak but not close in: Lin-Agrawal gives 1.4x more gain at
+                          0.39 THz and 2.4x at 1 THz, where closely spaced WDM/QKD channels sit.
 fiber/propagator.py      FiberPropagator: symmetric split-step GNLSE solver (dispersion + Kerr SPM +
                           full time-domain Raman response); f_R=0 recovers the plain-Kerr NLSE
 fiber/quantum_noise.py   QuantumRamanPropagator(FiberPropagator): adds spontaneous-Raman Langevin
@@ -160,7 +168,10 @@ fiber/brillouin.py       Stimulated Brillouin scattering (SBS): FiberMaterial ga
                           solves the steady-state coupled forward-pump/backward-Stokes power
                           equations as a two-point boundary value problem (shooting method), seeded
                           by a spontaneous-scattering noise floor; sbs_threshold_power() gives the
-                          standard analytic (Smith 1972) threshold formula. A distinct mechanism
+                          standard analytic (Smith 1972) threshold formula, over the shared kernel
+                          sbs_threshold_from_aeff(A_eff, g_B, L_eff), which callers working from
+                          computed modes (e.g. gmmnlse_raman_spectrum.py) use instead of repeating
+                          21*A_eff/(g_B*L_eff) inline. A distinct mechanism
                           from Raman (acoustic vs optical phonons): ~10 GHz shift and ~tens-of-MHz
                           linewidth (vs ~13 THz / ~THz for Raman), predominantly backward-
                           scattering, with a far lower CW threshold power -- modelled as a
@@ -205,7 +216,10 @@ fiber/hybrid_crosstalk.py  HybridCrosstalkPropagator: the first propagator in fi
                           the one piece of physics a pure power-domain (XPM/Raman) comparison cannot
                           give, and the reason this module exists: a phase-encoded protocol's
                           receiver measures exactly this relative phase.
-fiber/receiver_leakage.py  filter_leakage_photons(): a distinct, LINEAR, post-fiber mechanism from
+fiber/receiver_leakage.py  filter_leakage_photons() (and its kernel leaked_photons_per_gate(), which
+                          takes the received power directly and broadcasts, so studies computing
+                          their own attenuation -- gmmnlse_coexistence.py -- share this formula):
+                          a distinct, LINEAR, post-fiber mechanism from
                           everything else in fiber/ -- direct, un-shifted classical-carrier power
                           reaching the detector because a receive filter's real-world rejection
                           FLOOR (set by back-reflections, coating imperfections, secondary leakage
@@ -220,9 +234,13 @@ fiber/receiver_leakage.py  filter_leakage_photons(): a distinct, LINEAR, post-fi
                           spatial-mode diversity measurably fails to reduce classical-channel noise,
                           since that rules out mode-overlap-mediated mechanisms (Raman/XPM crosstalk)
                           as the dominant cause and points at this one instead.
-fiber/constants.py       CODATA constants (via scipy). c is exact; fiber/ previously imported c = 3e8
-                          from core/dfb_laser.py, a 0.07% error that shifts absolute propagation
-                          constants by ~4e3 rad/m, comparable to the GRIN mode-group spacing.
+fiber/constants.py       CODATA constants (via scipy): c, h, hbar, kB. The single source for every
+                          module in fiber/ and studies/ -- each previously carried its own
+                          hbar = 1.0545718e-34 (and materials.py its own kB), which is why this
+                          module exists. c is exact; fiber/ previously imported c = 3e8 from
+                          core/dfb_laser.py, a 0.07% error that shifts absolute propagation constants
+                          by ~4e3 rad/m, comparable to the GRIN mode-group spacing. core/ still uses
+                          its own c = 3e8 and h, so the laser models' published numbers are unchanged.
 fiber/raman_models.py    Frequency-domain silica Raman responses: BlowWood (single oscillator) and
                           LinAgrawal (2006, adds the boson peak): peak g_R 5.8e-14 m/W at 1550 nm (vs
                           5.1e-14), and 1.4x / 2.2x more gain than Blow-Wood at 0.4 / 3 THz, where WDM
@@ -231,22 +249,44 @@ fiber/grin_modes.py      Scalar LP-mode solver for alpha-profile GRIN and step-i
                           volume radial eigenproblem, Malitson Sellmeier cladding, fixed Delta n):
                           beta_p(omega) fitted per mode over a span, guided-band masks, normalised
                           fields, the four-index overlap tensor S_plmn and intensity overlaps S_qlql.
+                          field(p, x, y) samples a mode's normalised 2D transverse field (radial_profile
+                          gives R(r), principal_group gives G = 2m + l - 1), which studies/mmf_mode_profiles.py
+                          uses to render the LP profiles and check the l/m labelling.
                           Designs: om1, om3 (50/125, NA 0.2, alpha 2.05; shared by OM2-OM5) and smf28
                           (effective step NA 0.115, calibrated to Corning's A_eff, D, ZDW and cutoff).
                           OM3 at 1551.72 nm: 55 guided modes, A_eff(LP01) = 198 um^2, D = 22.1
                           ps/nm/km, LP11-LP01 walk-off 88 ps/km. Supersedes the reduced-order
                           parameters of multimode_fiber.py (A_eff 140 um^2, exponential overlap decay,
                           D = 17, calibrated DMD).
-fiber/gmmnlse.py         GMMNLSE (Poletti & Horak 2008), scalar and co-polarised, RK4IP: full per-mode
+fiber/gmmnlse.py         GMMNLSE (Poletti & Horak 2008), RK4IP. Optional extensions, each off by
+                          default so existing results are unchanged: polarisation=['x','y',...]
+                          resolves the two polarisations of a spatial mode (exact 2/3 isotropic
+                          Kerr factor cross-polarised, raman_copol_ratio on the Raman part, and
+                          D_PMD for coarse-step PMD per mode); backward=True accumulates the
+                          counter-propagating spontaneous PSD (no boundary-value iteration needed,
+                          since spontaneous scattering does not deplete the pump -- stimulated
+                          backward coupling stays in brillouin.py); vacuum_seed=True launches half
+                          a photon per bin so the Kerr terms generate spontaneous FWM;
+                          dispersive_overlaps=True lets the modes breathe with wavelength;
+                          alpha_dB_km=ModeLoss(...) derives differential mode attenuation and
+                          macrobend loss from the profiles; mode_coupling=ModeCoupling(...) adds
+                          random linear coupling; and propagate(..., adaptive=tol) switches to
+                          step-doubling error control with dz as the maximum step. Base solver: full per-mode
                           dispersion, loss, Kerr and Raman through S_plmn, self-steepening. A tensor
                           term is kept when phase matched to within coherence_tol (default 0.1/dz:
                           SPM, XPM, intermodal Raman gain, coherent coupling inside degenerate pairs;
                           coherence_tol = inf with small dz is the complete equation) and has at most
                           two spectator indices, a rule that preserves photon-number conservation.
                           Spontaneous Raman noise: noise='mean' integrates the ensemble-mean PSD in every
-                          guided mode (pump spectrum convolved with the Raman kernel, no wrap-around);
+                          guided mode (pump spectrum convolved with the Raman kernel, no wrap-around,
+                          at temperature=295 K by default, the laboratory value the studies use);
                           noise='stochastic' adds Langevin fields driven by local instantaneous pump
-                          power. Supersedes multimode_propagator.py, quantum_multimode.py and
+                          power. mode_coupling=ModeCoupling(kappa, correlation_length) adds random
+                          LINEAR mode coupling (bends, splices, connectors) as one random unitary per
+                          step, E|K_pq|^2 = kappa^2 w_pq dz with a Lorentzian weight
+                          w = 1/(1 + (dbeta0 L_c)^2), so coupling favours quasi-degenerate modes,
+                          conserves power exactly and accumulates diffusively (coupled power ~ kappa^2 w z).
+                          Supersedes multimode_propagator.py, quantum_multimode.py and
                           hybrid_crosstalk.py for multimode work: those used intensity-only intermodal
                           coupling, which gives no Raman gain from a CW pump in another mode.
 ```
@@ -275,9 +315,9 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 
 `tests/test_receiver_leakage.py` validates `fiber.receiver_leakage`: a 10 dB floor step gives exactly 10x fewer leaked photons (log-linear by construction); leaked power attenuates exactly with the classical channel's own `fiber.alpha[bright_mode]` over length; and `required_floor_dB` round-trips exactly through `filter_leakage_photons`.
 
-`tests/test_grin_modes.py` validates the mode solver: Malitson index at 1550 nm; eigenvalues of an exact infinite parabolic profile against the 2D harmonic-oscillator result (k²n₁² − β² = 2κG), with error 1.7e-5 at dr = 50 nm and second-order convergence; the parabolic LP01 effective area against 2π/κ (3.7e-6); SMF-28 against Corning's datasheet (single mode, A_eff 85.4 µm², D 16.6 ps/nm/km, still single-mode at 1270 nm); OM3 overlap symmetries (full index-permutation symmetry, the exact 1/3 LP11a/LP11b coherent ratio, azimuthal selection rules); and the dispersion fit reproducing solver β₀ to 2e-4 rad/m.
+`tests/test_grin_modes.py` validates the mode solver: Malitson index at 1550 nm; eigenvalues of an exact infinite parabolic profile against the 2D harmonic-oscillator result (k²n₁² − β² = 2κG), with error 1.7e-5 at dr = 50 nm and second-order convergence; the parabolic LP01 effective area against 2π/κ (3.7e-6); SMF-28 against Corning's datasheet (single mode, A_eff 85.4 µm², D 16.6 ps/nm/km, still single-mode at 1270 nm); OM3 overlap symmetries (full index-permutation symmetry, the exact 1/3 LP11a/LP11b coherent ratio, azimuthal selection rules); the dispersion fit reproducing solver β₀ to 2e-4 rad/m; and the 2D field sampler (`field`, `radial_profile`, `principal_group`): unit power over a sampling box, LP11a ⟂ LP11b to 1e-9, exactly 2*l* azimuthal sign changes for *l* = 0–3, and the group number 2m+l−1.
 
-`tests/test_gmmnlse.py` validates the GMMNLSE against independent limits: reduction to the split-step `FiberPropagator` for LP01 with β2/β3 and Blow-Wood Raman (1e-6 relative field difference); self-steepening peak delay 3γP₀z/ω₀ (24.67 vs 24.69 fs); exact decoupling of the circular LP11 combinations (|A±|² conserved to 1e-11, which fails if the coherent S_aabb term is wrong); CW intermodal Raman gain LP01 → LP11a against the analytic exponent (5 significant figures); the ensemble-mean spontaneous-Raman PSD against ħω g P₀ e^(−αL) L (6.6e-4) and the stochastic Langevin fields against the same (ratio 1.016 over 8 runs); and photon-number conservation with the complete 21-term three-mode tensor, Raman and self-steepening (1.3e-8).
+`tests/test_gmmnlse.py` validates the GMMNLSE against independent limits: reduction to the split-step `FiberPropagator` for LP01 with β2/β3 and Blow-Wood Raman (1e-6 relative field difference); self-steepening peak delay 3γP₀z/ω₀ (24.67 vs 24.69 fs); exact decoupling of the circular LP11 combinations (|A±|² conserved to 1e-11, which fails if the coherent S_aabb term is wrong); CW intermodal Raman gain LP01 → LP11a against the analytic exponent (5 significant figures); the ensemble-mean spontaneous-Raman PSD against ħω g P₀ e^(−αL) L (6.6e-4) and the stochastic Langevin fields against the same (ratio 1.016 over 8 runs); photon-number conservation with the complete 21-term three-mode tensor, Raman and self-steepening (1.3e-8); and random linear mode coupling (exactly unitary, 5.7e-15 power drift; per-step transfer variance κ²w·dz within 1% of analytic over 5000 draws of the coupling operator; the Lorentzian Δβ₀ weight recovered exactly, 3e-6, by driving both mode pairs from the same RNG stream; and coupled power growing ×2.25 over doubled distance, consistent with the linear accumulation expected of a random walk). Note the propagation-level ensemble converges only as 1/√runs, since |a|² after a random walk is exponentially distributed — hence the per-step test rather than a large ensemble. The later extensions are validated the same way, each against a target independent of the implementation: **adaptive stepping** reaches 7.5e-09 against a 5000-step reference in 429 steps, where 50 fixed steps of the same maximum size give 2.9e-03; **ModeLoss** shows the cladding power fraction rising from 0.0000 (LP01) to 0.0072 (LP91b) with DMA tracking it, a 5 mm bend leaving LP01 at 0.300 dB/km while stripping the highest-order mode at 8848 dB/km, and propagated powers matching exp(−α_p L) mode by mode; **dispersive overlaps** reproduce independently solved A_eff to <1% over 1450–1750 nm and scale the Stokes-peak PSD by 0.9320 against a predicted 0.9320 (−6.8% at 13.2 THz); the **vacuum seed** carries exactly 0.5000 photons/bin and, with a CW pump (which generates *no* sidebands by SPM alone — measured as exactly zero), grows modulation-instability sidebands peaking at 0.664 THz against the analytic √(2γP/|β₂|)/2π = 0.693 THz; **backward noise** matches the analytic (1−e^{−2αL})/2α while the forward term turns over at 1/α, giving backward/forward = 1.00, 1.02, 1.16, 4.57 at 1, 5, 14, 50 km; and **polarisation** reduces to the scalar solver to machine precision when one component is populated, gives a cross-polarised XPM factor of 0.6667 against the exact 2/3, and keeps PMD unitary to 2.2e-16.
 
 `tests/test_noise_calibration.py` checks the absolute spontaneous-Raman PSD of the single-mode `QuantumRamanPropagator` against the same analytic result (ratio 0.990). Its frequency-domain Langevin amplitudes (and those of `QuantumMultimodePropagator`, the intra-channel term of `QuantumWDMPropagator` and the self-noise term of `HybridCrosstalkPropagator`) were missing a factor √N, because `ifft` divides by N, which made that noise N times too weak (30–33 dB for the grids used). Results from `om3_raman_noise_sweep*.py` generated before the fix are affected; the time-domain inter-channel and cross-field noise terms were correct.
 
@@ -308,9 +348,14 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 | - | `multimode_fiber_study.py` | Multimode (OM1-OM5) fiber via `fiber/multimode_*`: intermodal dispersion (DMD) broadening ordering across OM1-OM5, and intermodal Raman scattering (pump pulse in one mode group cross-Raman-shifting a probe pulse in another) | `images/multimode_fiber/` |
 | - | `wdm_brillouin_study.py` | WDM effects via `fiber/wdm_propagator.py`: XPM-induced chirp on a probe channel, Raman tilt across a 9-channel comb; stimulated Brillouin scattering via `fiber/brillouin.py`: the classic reflectivity/transmission threshold knee vs input power | `images/wdm_brillouin/` |
 | - | `om3_raman_noise_sweep.py` / `om3_raman_noise_sweep_pulsed.py` | Spontaneous Raman noise floor in OM3 (quasi-CW and 1 GHz/100 ps pulsed) across 12 lengths x 9 injected powers, via `fiber/quantum_multimode.py`. Superseded by `gmmnlse_raman_spectrum.py`: results saved before the √N noise fix are 30–33 dB low, the two sweeps use different grids and noise bands so their pulsed/CW ratio is not meaningful, and the pulsed run drives noise with peak power | `images/om3_raman_noise/`, `images/om3_raman_noise_pulsed/` |
-| - | `hybrid_bb84_crosstalk.py` | Combined mode+wavelength crosstalk via `fiber/hybrid_crosstalk.py`: a bright reference (quasi-CW or 1 GHz pulsed) in OM3 mode group 1 / DWDM Ch 32 vs. a phase-encoded BB84 QKD signal in mode group 0 / Ch 34 -- spontaneous Raman noise landing in the QKD frame and XPM-induced differential phase between the signal's two time bins, swept over length and bright power | `images/hybrid_bb84_crosstalk/` |
-| - | `gmmnlse_raman_spectrum.py` | Chapter 4 Raman characterisation with `fiber/gmmnlse.py` on computed OM3 modes: CW 1551.72 nm pump in LP01 at 9 mW, ensemble-mean forward PSD in all 55 guided modes at 1–17 km (LP01-only vs total, per principal group), analytic backward PSD, SMF-28 references (30 km/30 mW, 10 km/9 mW), mode table, and peak Stokes PSD vs spool length at fixed and SBS/launch-ceiling-limited power. Plotted by the Chapter 4 cells of `replot_paper_10ghz.ipynb` | `images/gmmnlse_raman_spectrum/` (data in `data/`) |
-| - | `gmmnlse_coexistence.py` | Chapter 4 coexistence noise with `fiber/gmmnlse.py`: −30 dBm Ch30 classical channel in LP11b plus its 15 dB lantern leak into LP01, mean spontaneous-Raman photons per gate at the Ch34/LP01 QKD channel (0.05 nm filter, 500 ps gate) via overlap and via leak, XPM phase on the QKD tone, and the receiver-filter-leakage QBER maps (`Sim_QBER_vs_FilterFloor`, `Sim_QBER_vs_Length_Floors`) | `images/gmmnlse_coexistence/` (data in `data/`) |
+| - | `hybrid_bb84_crosstalk.py` | Combined mode+wavelength crosstalk via `fiber/hybrid_crosstalk.py`: a bright reference (quasi-CW or 1 GHz pulsed) in OM3 mode group 1 / DWDM Ch 32 vs. a phase-encoded BB84 QKD signal in mode group 0 / Ch 34 -- spontaneous Raman noise landing in the QKD frame and XPM-induced differential phase between the signal's two time bins, swept over length and bright power. Superseded by `gmmnlse_coexistence.py`: its two channels (192.90/193.10 THz = Ch29/Ch31 on the bench convention, 200 GHz apart, μ = 0.5) are not the experiment's (Ch30→Ch34, 400 GHz, μ = 0.4), and its propagator uses the Blow-Wood Raman response, ~1.4x weaker than Lin-Agrawal at 0.4 THz detuning | `images/hybrid_bb84_crosstalk/` |
+| - | `gmmnlse_raman_spectrum.py` | Chapter 4 Raman characterisation with `fiber/gmmnlse.py` on computed OM3 modes: CW 1551.72 nm pump in LP01 at 9 mW, ensemble-mean forward PSD in all 55 guided modes at 1–17 km (LP01-only vs total, per principal group), counter-propagating PSD from the solver's own `backward=True` accumulation (it replaced a duplicate analytic form in this study, which it reproduces to 2e-6), SMF-28 references (30 km/30 mW, 10 km/9 mW), mode table, and peak Stokes PSD vs spool length at fixed and SBS/launch-ceiling-limited power. Plotted by the Chapter 4 cells of `replot_paper_10ghz.ipynb` | `images/gmmnlse_raman_spectrum/` (data in `data/`) |
+| - | `gmmnlse_coexistence.py` | Chapter 4 coexistence noise with `fiber/gmmnlse.py`, for two classical configurations in LP11b — the original −30 dBm Ch30 SFP (anti-Stokes side) and the current 2.6 mW CW laser at 1547 nm / 193.79 THz (Stokes side, +390 GHz from Ch34) — each with its 15 dB lantern leak into LP01: mean spontaneous-Raman photons per gate at the Ch34/LP01 QKD channel (0.05 nm filter, 500 ps gate) via overlap and via leak, Raman-only QBER, XPM phase on the QKD tone, and the receiver-filter-leakage QBER maps for the SFP case (`Sim_QBER_vs_FilterFloor`, `Sim_QBER_vs_Length_Floors`). Launch powers are taken as power in the fibre, so the laser case is an upper bound. Also sweeps distributed random linear mode coupling for the laser case (`ModeCoupling`, ensemble of 8 seeds), parametrised by the measurable LP11b→LP01 crosstalk accumulated at 10 km rather than by κ |
+| - | `mmf_mode_profiles.py` | Mode profiles of OM3 at 1550 nm from `fiber/grin_modes.py`, as a check on the thesis LP-mode table: 2D fields (signed, showing the *l* phase cycles) and intensities (to sit beside a measured near field) of LP01/02/03, LP11/12/13, LP21/22/23, each verified to show *m* radial maxima and 2*l* azimuthal lobes; plus the principal-group structure G = 2m+l−1 against Gloge's β_G, mode counts per group, and the V-number scaling (V = 20.3, 55 spatial modes in 10 groups, 110 with polarisation). Plotted by the Chapter 3 cells of `replot_paper_10ghz.ipynb` | `images/mmf_mode_profiles/` (data in `data/`) |
+| - | `paper_10ghz_simulation.py` | Numerical reproduction of the 10 GHz phase-randomised gain-switched DFB + SLD experiment (Lo et al., arXiv:2601.04031): stochastic rate equations with Langevin + ASE noise, r1/KL/KS randomisation metrics with confidence intervals, timing-jitter vs randomisation trade-off, filtered and unfiltered optical spectra, and an injection-power sweep | `images/paper_10ghz/` |
+| - | `acceptance_bw_comparison.py` | The Part 1 frequency sweep repeated at three SLD acceptance bandwidths (0.6 nm ≈ the 77 GHz cavity resonance, 3.0 nm, 8.0 nm), comparing phase-randomisation quality, absolute jitter and AMZI outputs; writes per-bandwidth scalar JSON plus a comparison figure | `images/acceptance_bw_comparison_v2/` (data in `data/`; the un-suffixed `acceptance_bw_comparison/` holds an older run) |
+| - | `gs_phase_sweep.py` | Phase correlation of a gain-switched DFB with CW SLD injection from 1–10 GHz: 10⁶ pulses per rate via vectorised Euler–Maruyama over 200 parallel realisations, giving P(S), the pulse-to-pulse intensity autocorrelation r(Δ) and the phase coherence \|g⁽¹⁾(Δ)\| | PDF report |
+| - | `gs_injected_statistics.py` | Pulse-to-pulse statistics of ~10⁵ consecutive gain-switched pulses under CW SLD injection (Lang–Kobayashi terms, Langevin noise on carrier/photon/phase): sampled intensity distribution and intensity autocorrelation vs lag (`gs_inj_stats_*`) | `images/gain_switched_statistics/` | `images/gmmnlse_coexistence/` (data in `data/`) |
 
 ### PINN / Machine Learning Studies (Recommendations #7-12)
 

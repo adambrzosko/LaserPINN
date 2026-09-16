@@ -1,12 +1,21 @@
 """
 Combined mode + wavelength crosstalk on a phase-encoded BB84 QKD signal:
 a bright classical reference launched into OM3's FIRST EXCITED spatial
-mode group (mode 1) on DWDM Channel 32 (192.90 THz, 1554.134 nm),
-co-propagating with a weak coherent phase-encoded BB84 signal launched
-into the FUNDAMENTAL mode group (mode 0) on DWDM Channel 34 (193.10 THz,
-1552.524 nm, 200 GHz channel separation on the 100 GHz ITU grid) -- using
-fiber/hybrid_crosstalk.py, the first propagator in this codebase to
-combine spatial-mode and wavelength-channel diversity.
+mode group (mode 1) at 192.90 THz (1554.134 nm), co-propagating with a
+weak coherent phase-encoded BB84 signal launched into the FUNDAMENTAL
+mode group (mode 0) at 193.10 THz (1552.524 nm), 200 GHz apart on the
+100 GHz ITU grid -- using fiber/hybrid_crosstalk.py, the first propagator
+in this codebase to combine spatial-mode and wavelength-channel diversity.
+
+NOTE on channels and supersession: on the bench convention used elsewhere
+in this repo and in the thesis, f = 190 THz + 0.1 THz * n, these two
+frequencies are Ch31 and Ch29 -- they were previously labelled Ch34 and
+Ch32 here, which is wrong (Ch34 = 193.4 THz = 1550.12 nm). The experiment
+itself runs Ch30 -> Ch34, i.e. 400 GHz apart, at mu = 0.4; this study uses
+200 GHz and mu = 0.5. studies/gmmnlse_coexistence.py supersedes it with
+the experimental parameters, computed GRIN modes and the Lin-Agrawal
+Raman response (this study's propagator uses the Blow-Wood response of
+fiber/raman_response.py, which is ~1.4x weaker at 0.4 THz detuning).
 
 Both bright-signal cases already characterized for the co-channel/
 co-mode noise floor (studies/om3_raman_noise_sweep.py: quasi-CW;
@@ -48,7 +57,7 @@ from gsdfb.plotting import setup_plotting, save_fig
 from fiber.multimode_fiber import make_multimode_fiber
 from fiber.hybrid_crosstalk import HybridCrosstalkPropagator
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 def dbm_to_watts(dbm):
@@ -61,15 +70,17 @@ if __name__ == '__main__':
 
     print("=" * 70)
     print("  OM3 Hybrid Mode+Wavelength Crosstalk: Phase-Encoded BB84 QKD")
-    print("  Bright: mode 1, DWDM Ch 32 (192.90 THz)")
-    print("  QKD:    mode 0, DWDM Ch 34 (193.10 THz), 200 GHz separation")
+    print("  Bright: mode 1, 192.90 THz (Ch 29 on f = 190 THz + 0.1 THz x n)")
+    print("  QKD:    mode 0, 193.10 THz (Ch 31), 200 GHz separation")
     print("=" * 70)
 
     lengths_m = np.array([100, 500, 1000, 2000, 3000, 5000, 7000, 8000,
                            10000, 12000, 15000, 17000], dtype=float)
-    CHANNEL_34_THZ = 193.10
-    CHANNEL_32_THZ = 192.90
-    SEPARATION_HZ = (CHANNEL_34_THZ - CHANNEL_32_THZ) * 1e12
+    # Ch31/Ch29 on the bench convention f = 190 THz + 0.1 THz x n (see the module
+    # docstring): NOT the Ch34/Ch30 pair of the experiment, which is 400 GHz apart.
+    CHANNEL_31_THZ = 193.10
+    CHANNEL_29_THZ = 192.90
+    SEPARATION_HZ = (CHANNEL_31_THZ - CHANNEL_29_THZ) * 1e12
     LAMBDA_QKD = 1552.524e-9
 
     BRIGHT_AVG_POWER_DBM = 0.0

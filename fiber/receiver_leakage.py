@@ -29,11 +29,11 @@ spatial mode, it does not care whether the classical channel shared a
 spatial mode with the QKD signal or not -- consistent with an
 experimental observation that mode diversity alone gave no improvement.
 
-    from fiber.receiver_leakage import filter_leakage_photons
+    from fiber.receiver_leakage import filter_leakage_photons, leaked_photons_per_gate
 """
 import numpy as np
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 def filter_leakage_photons(P_bright_launch_W, L, fiber, bright_mode,
@@ -61,9 +61,18 @@ def filter_leakage_photons(P_bright_launch_W, L, fiber, bright_mode,
     float -- mean photons per QKD detection gate from this mechanism alone
     """
     P_at_receiver_W = P_bright_launch_W * np.exp(-fiber.alpha[bright_mode] * L)
-    P_leaked_W = P_at_receiver_W / 10 ** (filter_floor_dB / 10.0)
-    E_photon = hbar * omega_qkd
-    return P_leaked_W * gate_window_s / E_photon
+    return leaked_photons_per_gate(P_at_receiver_W, filter_floor_dB, omega_qkd, gate_window_s)
+
+
+def leaked_photons_per_gate(P_receiver_W, filter_floor_dB, omega_qkd, gate_window_s):
+    """Photons per detection gate from a carrier of power `P_receiver_W` (W, already at
+    the receiver) leaking through a filter with rejection floor `filter_floor_dB`.
+
+    The kernel of filter_leakage_photons, taking powers directly so callers that compute
+    the received power themselves (e.g. from the GMMNLSE stack's own attenuation) share
+    this formula instead of repeating it. Broadcasts over powers and floors."""
+    P_leaked_W = np.asarray(P_receiver_W) / 10 ** (np.asarray(filter_floor_dB) / 10.0)
+    return P_leaked_W * gate_window_s / (hbar * omega_qkd)
 
 
 def required_floor_dB(P_bright_launch_W, L, fiber, bright_mode,

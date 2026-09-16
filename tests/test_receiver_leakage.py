@@ -4,7 +4,7 @@ import numpy as np
 from fiber.multimode_fiber import make_multimode_fiber
 from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
 
-hbar = 1.0545718e-34
+from fiber.constants import hbar
 
 
 def check_10dB_halves_in_log():

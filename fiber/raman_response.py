@@ -2,6 +2,19 @@
 Raman response in the frequency domain, and the associated classical
 stimulated-Raman gain spectrum.
 
+Which model this is, and when it is the wrong one
+-------------------------------------------------
+This module implements the single-damped-oscillator Blow-Wood response
+(f_R = 0.18 from fiber.materials), and is what the legacy propagators --
+quantum_noise, quantum_multimode, quantum_wdm, hybrid_crosstalk -- use.
+fiber.raman_models carries a second model, LinAgrawal (f_R = 0.245), which
+adds the boson peak; fiber.gmmnlse uses it by default. The two agree to
+12% at the 13.2 THz gain peak but NOT close in, where Blow-Wood has no
+boson peak: Lin-Agrawal gives 1.4x more gain at 0.39 THz and 2.4x at
+1 THz. Closely spaced WDM/QKD channels sit exactly there, so results from
+this module at sub-THz detuning are systematically low; prefer
+fiber.gmmnlse with LinAgrawal for that regime.
+
     from fiber.raman_response import raman_response_freq_analytic, raman_gain_spectrum
 """
 import numpy as np

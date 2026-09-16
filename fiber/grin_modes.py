@@ -182,13 +182,22 @@ class FibreModes:
         wavelengths = 2 * np.pi * c / (self.omega0 + d_omega)
         lm = sorted({(p.l, p.m) for p in self.modes})
         table = {key: np.full(n_scan, np.nan) for key in lm}
+        area = np.full(n_scan, np.nan)
         for i, lam in enumerate(wavelengths):
             for l in sorted({key[0] for key in lm}):
-                _, beta, _ = _radial_solve(self.design, lam, l, dr)
+                r, beta, R = _radial_solve(self.design, lam, l, dr)
+                if l == 0 and beta.size:
+                    # LP01 is psi = R/sqrt(2 pi), so 1/A_eff = (1/2 pi) int R^4 r dr. Taken
+                    # from the scan that is already being solved, at no extra cost.
+                    area[i] = 2 * np.pi / (np.sum(R[:, 0] ** 4 * r) * dr)
                 for (ll, m) in lm:
                     if ll == l and m <= beta.size:
                         table[(ll, m)][i] = beta[m - 1]
         self._x_scale = self.span
+        ok_area = np.isfinite(area)
+        self._area_fit = np.polynomial.Polynomial.fit(
+            d_omega[ok_area] / self._x_scale, area[ok_area],
+            min(3, int(ok_area.sum()) - 1), domain=[-1, 1])
         self._fits, self._guided_from, self._cutoff_found = {}, {}, {}
         for key, beta in table.items():
             ok = np.isfinite(beta)
@@ -280,8 +289,64 @@ class FibreModes:
         ang = (Phi[:Q] ** 2) @ (Phi[Q:] ** 2).T * dphi
         return rad * ang
 
-    def effective_area(self, p):
-        return 1.0 / self.overlap_tensor([p])[0, 0, 0, 0]
+    def effective_area(self, p, omega=None):
+        """Effective area of mode p (m^2) at the design frequency, or at `omega` if given
+        (scaled by area_scale, see there)."""
+        A0 = 1.0 / self.overlap_tensor([p])[0, 0, 0, 0]
+        return A0 if omega is None else A0 / self.area_scale(omega)
+
+    def area_scale(self, omega):
+        """A_eff(omega0)/A_eff(omega) for the fundamental mode: the single factor by which
+        every overlap integral scales with optical frequency.
+
+        The modes breathe with wavelength -- in OM3 the LP01 effective area runs from 185
+        to 224 um^2 between 1450 and 1750 nm, +21% -- but their SHAPES do not: the
+        dimensionless products S_plmn * A_eff are constant to ~1e-4 over the same range
+        (0.5035 for LP01-LP11b, 0.2539 for LP01-LP21a). For a parabolic profile this is
+        exact, since A_eff = 2 pi / kappa with kappa proportional to 1/lambda, and indeed
+        A_eff tracks lambda here to 0.1%. So the whole frequency dependence of the overlap
+        tensor is this one scalar, taken from a polynomial fit over the dispersion scan,
+        rather than a frequency-dependent tensor whose extra content would be nil."""
+        x = (np.asarray(omega) - self.omega0) / self._x_scale
+        return self._area_fit(0.0) / self._area_fit(x)
+
+    # ------------------------------------------------------------------ mode fields
+    def radial_profile(self, p):
+        """(r, R_p(r)) for mode p, normalised to integral R^2 r dr = 1."""
+        return self.r, self._R[p]
+
+    def field(self, p, x, y):
+        """Scalar transverse field psi_p(x, y), normalised to integral |psi|^2 dA = 1.
+        R(r) is interpolated onto the sampling points and taken as zero beyond the
+        cladding radius, so a sampling box wider than the solved region is safe."""
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        R = np.interp(np.hypot(x, y), self.r, self._R[p], left=self._R[p][0], right=0.0)
+        mode = self.modes[p]
+        if mode.l == 0:
+            return R / np.sqrt(2 * np.pi)
+        phi = np.arctan2(y, x)
+        harmonic = np.cos(mode.l * phi) if mode.orientation == 'a' else np.sin(mode.l * phi)
+        return R * harmonic / np.sqrt(np.pi)
+
+    def principal_group(self, p):
+        """Principal mode group number G = 2m + l - 1 of mode p."""
+        return 2 * self.modes[p].m + self.modes[p].l - 1
+
+    def cladding_power_fraction(self, p):
+        """Fraction of mode p's power lying beyond the core radius. Grows with mode order
+        and is the natural driver of differential mode attenuation: the further a mode
+        reaches past the core, the more it samples the cladding, the coating and the
+        core-cladding interface."""
+        w = self._R[p] ** 2 * self.r * self.dr
+        return float(w[self.r >= self.design.core_radius].sum() / w.sum())
+
+    def guidance_margin(self, p):
+        """gamma_p = sqrt(beta_p^2 - (n_clad k0)^2) (rad/m): how far mode p sits above the
+        cladding light line. Small near cutoff, and the quantity that controls how readily
+        a bend couples the mode to radiation."""
+        k0 = 2 * np.pi / self.wavelength
+        margin = self.beta0[p] ** 2 - (silica_index(self.wavelength) * k0) ** 2
+        return float(np.sqrt(margin)) if margin > 0 else 0.0
 
     def degenerate_groups(self, tol=1e-6):
         """Lists of mode indices whose beta0 agree to `tol` rad/m."""

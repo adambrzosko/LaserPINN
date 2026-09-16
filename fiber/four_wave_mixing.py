@@ -68,7 +68,7 @@ absolute prefactor.
 import numpy as np
 from itertools import combinations_with_replacement
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 def fwm_phase_mismatch(fiber, omega_i, omega_j, omega_k):

@@ -46,13 +46,13 @@ log-space, since Stokes power typically spans tens of orders of
 magnitude between the noise floor and threshold) until the computed
 P_s(L) matches P_noise.
 
-    from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, spontaneous_brillouin_noise_power
+    from fiber.brillouin import BrillouinPropagator, sbs_threshold_power, sbs_threshold_from_aeff, spontaneous_brillouin_noise_power
 """
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 def spontaneous_brillouin_noise_power(fiber):
@@ -62,19 +62,25 @@ def spontaneous_brillouin_noise_power(fiber):
     return hbar * fiber.omega0 * fiber.material.delta_nu_B
 
 
-def sbs_threshold_power(fiber, L, K=21.0):
+def sbs_threshold_from_aeff(A_eff, g_B, L_eff, K=21.0):
     """Analytic CW SBS threshold power (W): P_th = K*A_eff/(g_B*L_eff).
 
     Standard engineering formula (Smith, Applied Optics, 1972); K~21 is
     the commonly used value accounting for polarization/spectral
-    averaging in a typical fiber. L_eff = (1-exp(-alpha*L))/alpha is the
-    effective (loss-limited) interaction length.
+    averaging in a typical fiber. Takes the numbers directly (and
+    broadcasts), so callers working from computed modes -- e.g. an A_eff
+    from fiber.grin_modes -- use the same formula as those holding a
+    FiberParams, rather than repeating it inline.
     """
+    return K * np.asarray(A_eff) / (g_B * np.asarray(L_eff))
+
+
+def sbs_threshold_power(fiber, L, K=21.0):
+    """Analytic CW SBS threshold power (W) of `fiber` over length L (m), with
+    L_eff = (1-exp(-alpha*L))/alpha the effective (loss-limited) interaction length."""
     alpha = fiber.alpha
     L_eff = (1 - np.exp(-alpha * L)) / alpha if alpha > 0 else L
-    g_B = fiber.material.g_B
-    A_eff = fiber.geometry.A_eff
-    return K * A_eff / (g_B * L_eff)
+    return sbs_threshold_from_aeff(fiber.geometry.A_eff, fiber.material.g_B, L_eff, K)
 
 
 class BrillouinPropagator:

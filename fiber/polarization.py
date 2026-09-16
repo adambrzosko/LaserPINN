@@ -60,7 +60,7 @@ import numpy as np
 
 from fiber.raman_response import raman_response_freq_analytic
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 class PolarizationPropagator:

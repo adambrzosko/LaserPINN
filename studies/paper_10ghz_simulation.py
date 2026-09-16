@@ -735,7 +735,7 @@ if __name__ == '__main__':
     T_NOISE = 300.0             # noise temperature (K)
 
     BW_det = DET_BW_GHZ * 1e9
-    k_B = 1.381e-23
+    from fiber.constants import kB as k_B
     opt_attn_lin = 10**(-OPT_ATTN_DB / 10)
 
     def detect_amzi(pk_P, pk_phi, f_rep, enob=SCOPE_ENOB, seed=54321):

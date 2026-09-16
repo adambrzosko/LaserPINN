@@ -27,6 +27,7 @@ import numpy as np
 from fiber.constants import c, hbar
 from fiber.gmmnlse import GMMNLSE, TimeGrid
 from fiber.grin_modes import DESIGNS, FibreModes
+from fiber.brillouin import sbs_threshold_from_aeff
 from fiber.raman_models import LinAgrawal, peak_gain_coefficient, spontaneous_shape
 
 OUT = Path(__file__).resolve().parent.parent / 'images' / 'gmmnlse_raman_spectrum' / 'data'
@@ -62,16 +63,6 @@ def principal_group(mode):
     return 2 * mode.m + mode.l - 1
 
 
-def backward_psd(modes, receivers, P0, alpha, L):
-    """Backward spontaneous-Raman PSD at the input: source a_q P0 exp(-alpha z), returning
-    with exp(-alpha z), integrated over the fibre."""
-    omega, Omega = GRID.omega, GRID.Omega
-    S = modes.intensity_overlaps(receivers, [modes.index_of('LP01')])[:, 0]
-    guided = np.asarray([modes.is_guided(q, omega) for q in receivers])
-    a = (hbar * omega * (N2 * omega / c) * spontaneous_shape(RAMAN, Omega, TEMPERATURE))[None, :]
-    return a * S[:, None] * guided * P0 * (1 - np.exp(-2 * alpha * L)) / (2 * alpha)
-
-
 def run():
     t0 = time.time()
     OUT.mkdir(parents=True, exist_ok=True)
@@ -83,7 +74,7 @@ def run():
     i01, i11 = om3.index_of('LP01'), [om3.index_of('LP11a'), om3.index_of('LP11b')]
     groups = np.array([principal_group(m) for m in om3.modes])
     gmm = GMMNLSE(om3, GRID, ['LP01'], n2=N2, raman=RAMAN, alpha_dB_km=OM3_ALPHA_DB_KM,
-                  noise='mean', temperature=TEMPERATURE)
+                  noise='mean', temperature=TEMPERATURE, backward=True)
     z_save = np.asarray(OM3_LENGTHS_KM) * 1e3
     res = gmm.propagate(GRID.cw(OM3_LAUNCH_W)[None, :], z_save[-1], dz=DZ, z_save=z_save)
 
@@ -94,7 +85,7 @@ def run():
 
     alpha = _db_to_power_attenuation(OM3_ALPHA_DB_KM)
     receivers = list(range(len(om3)))
-    bwd = np.stack([backward_psd(om3, receivers, OM3_LAUNCH_W, alpha, L)[:, order] for L in z_save])
+    bwd = res.noise_psd_backward[:, :, order]                      # (Nz, modes, N)
     bwd_lp01, bwd_total = bwd[:, i01], bwd.sum(axis=1)
 
     # ---------------------------------------------------------------- SMF-28
@@ -112,7 +103,7 @@ def run():
            * float(spontaneous_shape(RAMAN, np.array([2 * np.pi * PEAK_SHIFT_HZ]), TEMPERATURE)[0]))
     L = LENGTH_SCAN_KM * 1e3
     L_eff = (1 - np.exp(-alpha * L)) / alpha
-    p_sbs = 21 * A_eff / (G_B * L_eff)
+    p_sbs = sbs_threshold_from_aeff(A_eff, G_B, L_eff)
     p_limited = np.minimum(LAUNCH_CEILING_W, SBS_MARGIN * p_sbs)
     peak_fixed = a01 * OM3_LAUNCH_W * L * np.exp(-alpha * L)
     peak_limited = a01 * p_limited * L * np.exp(-alpha * L)

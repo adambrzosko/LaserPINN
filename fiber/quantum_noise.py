@@ -42,7 +42,7 @@ import numpy as np
 from fiber.propagator import FiberPropagator
 from fiber.raman_response import raman_gain_spectrum
 
-hbar = 1.0545718e-34  # J.s
+from fiber.constants import hbar
 
 
 class QuantumRamanPropagator(FiberPropagator):
