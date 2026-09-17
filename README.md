@@ -26,6 +26,12 @@ million_pulse_comparison.py   High-throughput stochastic solver (Numba JIT) + wa
 
 All analysis scripts import from these core modules.
 
+`app/` is a browser GUI over `fiber/` (see **Interactive workbench** under Usage):
+`app/server.py` is a stdlib `ThreadingHTTPServer` exposing `/api/fibres`, `/api/modes` and
+`/api/propagate`; `app/index.html` is a dependency-free single page that draws the results
+on canvas. It imports from `fiber/` and never the other way round, so the GUI can be
+deleted without touching the physics. `.claude/launch.json` starts it in the preview pane.
+
 `fiber/` is a separate, independent package for nonlinear fiber propagation, built to consume the complex field output of `core.dfb_laser` / `core.million_pulse_comparison` / `core.sld_injection`:
 
 ```
@@ -421,6 +427,48 @@ Create via: `make_laser('fp')` or `make_laser('fp', L=500e-6)` for overrides.
 ## Usage
 
 All scripts are run from the `Simulations/` root directory using `python3 -m`:
+
+### Interactive workbench
+
+A browser GUI over the mode solver and the GMMNLSE: pick a fibre (OM1/OM3/SMF-28 or custom
+geometry), launch one or more beams into named LP modes, and get back mode profiles, the
+output spectrum, the temporal envelope, power against distance and the spontaneous-Raman
+noise floor. Standard library only — no web framework is added to the project.
+
+```bash
+python3 app/server.py --port 8787        # then open http://localhost:8787
+```
+
+Every number comes from `fiber/`; the server only marshals JSON. Mode solves are cached
+(0.02 s for SMF-28, 0.24 s for OM3's 55 modes, 0.95 s for OM1's 153), and a single-mode
+10 km run on a 2048-point grid takes ~0.08 s, so runs are synchronous. The dispersion fit
+span is widened automatically to cover whatever time grid you ask for. All seven solver
+extensions are exposed as checkboxes, and `noise = mean` plus `backward` plots the
+forward and counter-propagating PSDs together (they coincide at 1 km and differ by 4.6x
+at 50 km, as the analytic forms require).
+
+**Waveguide parameters.** A dispersion card plots n_eff, beta2, D, beta3, A_eff and gamma
+against wavelength for several modes at once, all from the one cached mode solve: beta(omega)
+is a fitted polynomial, so its derivatives are taken ANALYTICALLY (`fit.deriv(n)/x_scale**n`).
+Finite-differencing that fit is not an option -- it returns beta3 with the wrong sign and
+3400x the magnitude. Curves are masked where a mode is not guided rather than extrapolated.
+
+**Mode viewer.** Amplitude (signed field) or intensity, for LP modes or for their vector
+constituents from `fiber/vector_modes.py` -- pick TE01, TM01, HE21a/b on an LP11 mode and the
+polarisation map is drawn as a quiver overlay. Mode-field diameter is reported under three
+conventions, with 1/e^2 shown as n/a for modes with a radial node (LP02, LP03), where it is
+undefined; quoting it anyway previously produced 0.05 um.
+
+**Solver controls.** Nonlinear terms (Kerr only / Kerr+Raman phase-matched / complete tensor,
+which raises the OM3 two-mode term count from 6 to 8 and admits intergroup FWM) and dispersion
+order (full fit / beta2 / beta3 / beta4), alongside dt and the maximum step dz.
+
+**Retarded frame.** The solver integrates in the co-moving frame of the reference mode, so
+every other mode drifts across the time window at its own walk-off -- 87 ps/km for LP11 in
+OM3, 683 ps/km across all 55 modes against a ~100 ps window. The temporal axis is labelled
+with its reference mode, per-mode drift is reported, and a mode that has wrapped around the
+window is flagged with the distance at which the window fills (1.17 km for LP01+LP11b at
+2048 points / 50 fs). Without that, a multimode temporal plot silently shows a wrapped pulse.
 
 ### Core Simulations
 

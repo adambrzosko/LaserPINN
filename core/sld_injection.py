@@ -393,7 +393,8 @@ def solve_transient_injection_stochastic(params, I_func, inj, S_inj,
         net_gain = 0.5 * (1 + 1j * params.alpha_H) * (
             params.Gamma * params.v_g * g - 1 / params.tau_p
         )
-        E = E * (1 + net_gain * dt)
+        # exact for the linear part; Euler lets alpha_H leak into |E|
+        E = E * np.exp(net_gain * dt)
 
         E += np.sqrt(R_sp_mode) * sqrt_half_dt * (
             rng.standard_normal() + 1j * rng.standard_normal()

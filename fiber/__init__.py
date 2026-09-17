@@ -164,3 +164,4 @@ from fiber.receiver_leakage import filter_leakage_photons, required_floor_dB
 from fiber.raman_models import BlowWood, LinAgrawal
 from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
 from fiber.gmmnlse import GMMNLSE, ModeCoupling, ModeLoss, PropagationResult, TimeGrid
+from fiber.vector_modes import CONSTITUENT_TABLE, constituents, vector_field
