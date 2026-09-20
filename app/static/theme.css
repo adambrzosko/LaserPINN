@@ -1,0 +1,124 @@
+  :root {
+    --paper: #f5f6f8; --surface: #fff; --ink: #12161f; --muted: #646e7e;
+    --rule: #d9dde4; --copper: #a85d28; --copper-bg: #f6ede4; --teal: #2f6f6b;
+    --field-pos: #a85d28; --field-neg: #2f6f6b;
+    /* categorical series slots: validated light on #fff (lightness, chroma, CVD, contrast) */
+    --s1: #c0622a; --s2: #16917f; --s3: #2a78d6; --s4: #b8458c;
+    /* status: reserved for meaning, always shipped with an icon and a word */
+    --good: #2f7a3e; --warn: #9a6200; --bad: #c0392b;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #10141b; --surface: #161b24; --ink: #e6e9ef; --muted: #939cab;
+      --rule: #262d39; --copper: #d8823f; --copper-bg: #221a12; --teal: #58a29c;
+      --field-pos: #d8823f; --field-neg: #58a29c;
+      /* re-stepped for the dark surface #161b24, not flipped; validated there */
+      --s1: #d07a36; --s2: #1fa08d; --s3: #4f86de; --s4: #c8609c;
+      --good: #6dbf7e; --warn: #e2a93b; --bad: #ec6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body);
+         font-size: 14px; line-height: 1.5; }
+  header { border-bottom: 1px solid var(--rule); padding: 14px 20px; display: flex;
+           align-items: baseline; gap: 14px; flex-wrap: wrap; background: var(--surface); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  header .status { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  header .status.busy { color: var(--copper); }
+  header .status.err { color: #c0392b; }
+
+  .layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 0; align-items: start; }
+  @media (max-width: 880px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+  .panel { border-right: 1px solid var(--rule); padding: 16px 18px 40px; }
+  @media (max-width: 880px) { .panel { border-right: 0; border-bottom: 1px solid var(--rule); } }
+  fieldset { border: 0; border-top: 1px solid var(--rule); margin: 0 0 4px; padding: 14px 0 10px; }
+  fieldset:first-of-type { border-top: 0; padding-top: 0; }
+  legend { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+           color: var(--muted); padding: 0; margin-bottom: 8px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .row.one { grid-template-columns: 1fr; }
+  /* [hidden] must win over .row's display:grid, which is more specific than the UA rule */
+  [hidden] { display: none !important; }
+  label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
+  input, select { width: 100%; padding: 6px 8px; font-family: var(--mono); font-size: 12.5px;
+                  background: var(--surface); color: var(--ink);
+                  border: 1px solid var(--rule); border-radius: 3px; }
+  input:focus-visible, select:focus-visible, button:focus-visible
+      { outline: 2px solid var(--copper); outline-offset: 1px; }
+  .check { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 12.5px; color: var(--ink); }
+  .check input { width: auto; }
+  button { font-family: var(--body); font-size: 13.5px; font-weight: 500; padding: 9px 14px;
+           border-radius: 3px; border: 1px solid var(--copper); background: var(--copper);
+           color: #fff; cursor: pointer; width: 100%; }
+  button.ghost { background: transparent; color: var(--copper); }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .beam { border: 1px solid var(--rule); border-radius: 3px; padding: 10px; margin-bottom: 8px;
+          background: var(--surface); }
+  .beam .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .beam .head b { font-size: 12.5px; }
+  .beam .head button { width: auto; padding: 2px 7px; font-size: 11px; border-color: var(--rule);
+                       background: transparent; color: var(--muted); }
+
+  main { padding: 16px 20px 60px; min-width: 0; }
+  .facts { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--rule); border-radius: 3px;
+           overflow: hidden; background: var(--surface); margin-bottom: 14px; }
+  .facts div { flex: 1 1 110px; padding: 9px 12px; border-right: 1px solid var(--rule); }
+  .facts div:last-child { border-right: 0; }
+  .facts b { display: block; font-family: var(--mono); font-size: 15px; font-weight: 500; }
+  /* no text-transform: uppercasing turns σ into Σ and µ into Μ, which changes what a label means */
+  .facts span { font-size: 10.5px; color: var(--muted); letter-spacing: 0.03em; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); padding: 12px 14px; }
+  .card h2 { font-size: 12.5px; margin: 0 0 2px; font-weight: 600; }
+  .card .cap { font-size: 11.5px; color: var(--muted); margin: 0 0 10px; }
+  canvas { width: 100%; height: auto; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; }
+
+  .tablewrap { overflow: auto; max-height: 260px; border: 1px solid var(--rule); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { padding: 5px 9px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--surface); font-family: var(--mono); font-size: 10px;
+       letter-spacing: 0.04em; color: var(--muted); font-weight: 500; }
+  td { font-family: var(--mono); }
+  tr.sel td { background: var(--copper-bg); }
+  tr:hover td { cursor: pointer; color: var(--copper); }
+  .err { border: 1px solid #c0392b; background: #c0392b18; color: #c0392b; padding: 10px 12px;
+         border-radius: 3px; font-size: 12.5px; margin-bottom: 14px; white-space: pre-wrap;
+         font-family: var(--mono); }
+  .hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+
+  /* ---- shared across the workbench pages ---- */
+  header nav.tools { display: flex; gap: 2px; }
+  header nav.tools a { font-size: 12.5px; color: var(--muted); text-decoration: none; padding: 3px 8px;
+                       border-radius: 3px; }
+  header nav.tools a:hover { color: var(--ink); background: var(--paper); }
+  header nav.tools a[aria-current="page"] { color: var(--ink); background: var(--copper-bg); }
+  code { font-family: var(--mono); font-size: 0.92em; }
+
+  .plotwrap { position: relative; }
+  .plotwrap canvas:focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; }
+  .plotwrap .hair { position: absolute; top: 12px; width: 1px; background: var(--muted); opacity: .45;
+                    pointer-events: none; }
+  .plotwrap .tip { position: absolute; top: 14px; min-width: 120px; max-width: 260px; pointer-events: none;
+                   background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+                   padding: 6px 8px; font-size: 11.5px; box-shadow: 0 2px 8px #0002; z-index: 2; }
+  .plotwrap .tip .tx { color: var(--muted); font-family: var(--mono); font-size: 10.5px; margin-bottom: 3px; }
+  .plotwrap .tip .tr { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .plotwrap .tip .tr i { display: inline-block; width: 12px; height: 2px; flex: none; transform: translateY(-3px); }
+  .plotwrap .tip .tr b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  .plotwrap .tip .tr span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .legend i.bar { height: 9px; width: 9px; border-radius: 2px; }
+  .legend i.dash { background: none !important; border-top: 2px dashed; height: 0; }
+  .legend i.band { height: 9px; width: 12px; opacity: .35; }
+  details.data { margin-top: 6px; }
+  details.data summary { font-size: 11px; color: var(--muted); cursor: pointer; width: max-content; }
+  details.data .tablewrap { max-height: 220px; margin-top: 6px; }
+  .stale canvas { opacity: .55; transition: opacity .12s; }
+  @media (prefers-reduced-motion: reduce) { .stale canvas { transition: none; } }

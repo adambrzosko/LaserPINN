@@ -39,6 +39,7 @@ from core.gain_switched_interference import (
     plot_optical_spectrum, plot_field_autocorrelation,
     plot_intensity_autocorrelation, plot_mzi_traces, plot_mzi_visibility,
 )
+from gsdfb import save_fig
 
 
 # ── Injected pulse train simulation ─────────────────────────────────────────
@@ -421,14 +422,14 @@ def main():
     fig1 = plot_pulse_train_comparison(data_free, data_inj, gs, laser,
                                        inj, S_inj)
     fname = f'{prefix}_pulse_comparison.png'
-    fig1.savefig(fname, dpi=args.dpi)
+    save_fig(fig1, fname, dpi=args.dpi)
     print(f"       Saved: {fname}")
 
     # ── 4. Spectrum comparison ────────────────────────────────────────────
     print(f"\n  4/7  Spectrum comparison...")
     fig2 = plot_spectrum_comparison(data_free, data_inj, laser)
     fname = f'{prefix}_spectrum_comparison.png'
-    fig2.savefig(fname, dpi=args.dpi)
+    save_fig(fig2, fname, dpi=args.dpi)
     print(f"       Saved: {fname}")
 
     # ── 5. Field autocorrelation comparison ───────────────────────────────
@@ -443,7 +444,7 @@ def main():
 
     fig3 = plot_g1_comparison(tau_f, g1_f, tau_i, g1_i, gs, tc_free, tc_inj)
     fname = f'{prefix}_g1_comparison.png'
-    fig3.savefig(fname, dpi=args.dpi)
+    save_fig(fig3, fname, dpi=args.dpi)
     print(f"       Saved: {fname}")
 
     # ── 6. Intensity autocorrelation comparison ───────────────────────────
@@ -455,7 +456,7 @@ def main():
 
     fig4 = plot_g2_comparison(tau_g2f, g2_f, tau_g2i, g2_i, gs)
     fname = f'{prefix}_g2_comparison.png'
-    fig4.savefig(fname, dpi=args.dpi)
+    save_fig(fig4, fname, dpi=args.dpi)
     print(f"       Saved: {fname}")
 
     # ── 7. MZI visibility comparison ──────────────────────────────────────
@@ -470,7 +471,7 @@ def main():
     )
     fig5 = plot_visibility_comparison(tau_vf, vis_f, tau_vi, vis_i, gs)
     fname = f'{prefix}_visibility_comparison.png'
-    fig5.savefig(fname, dpi=args.dpi)
+    save_fig(fig5, fname, dpi=args.dpi)
     print(f"       Saved: {fname}")
 
     # ── Summary ───────────────────────────────────────────────────────────

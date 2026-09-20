@@ -38,6 +38,7 @@ from core.million_pulse_comparison import (
     simulate_pulses, simulate_pulses_waveform,
     build_raised_cosine, build_fourier, build_trapezoid,
 )
+from gsdfb import save_fig
 
 
 # ── Cost functions ────────────────────────────────────────────────────
@@ -328,7 +329,7 @@ def plot_results(data):
 
     plt.tight_layout()
     fname1 = f'images/waveform_opt/waveform_{data["objective"]}_{data["f_ghz"]:.0f}GHz.png'
-    fig1.savefig(fname1, dpi=150)
+    save_fig(fig1, fname1, dpi=150)
     print(f"  Saved: {fname1}")
 
     # ── Figure 2: Convergence ─────────────────────────────────────
@@ -347,7 +348,7 @@ def plot_results(data):
     ax2.grid(True, alpha=0.3)
     plt.tight_layout()
     fname2 = f'images/waveform_opt/convergence_{data["objective"]}_{data["f_ghz"]:.0f}GHz.png'
-    fig2.savefig(fname2, dpi=150)
+    save_fig(fig2, fname2, dpi=150)
     print(f"  Saved: {fname2}")
 
     plt.close('all')
@@ -450,7 +451,7 @@ def run_all_objectives(f_ghz=5.0, S_inj=0.0, n_pulses=50_000,
 
     plt.tight_layout()
     fname = f'images/waveform_opt/summary_{f_ghz:.0f}GHz.png'
-    fig.savefig(fname, dpi=150)
+    save_fig(fig, fname, dpi=150)
     print(f"\n  Saved: {fname}")
     plt.close('all')
 

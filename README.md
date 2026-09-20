@@ -470,6 +470,104 @@ with its reference mode, per-mode drift is reported, and a mode that has wrapped
 window is flagged with the distance at which the window fills (1.17 km for LP01+LP11b at
 2048 points / 50 fs). Without that, a multimode temporal plot silently shows a wrapped pulse.
 
+### Run browser
+
+Which run made a figure, from which parameters, and has the code moved on since? Open
+http://localhost:8787/runs. It indexes `images/` and, for each figure, shows the script that
+writes there, the parameters, whether the figure is used verbatim in the thesis, and whether the
+source has changed since it was written.
+
+The answer is in two levels, never mixed:
+
+- **Recorded.** `gsdfb.plotting.save_fig` now writes a sidecar `<figure>.png.json` at save time
+  (`gsdfb/provenance.py`): script, command, the `params=` you pass, the calling module's
+  upper-case constants (from the calling function as well as the module), the laser, library
+  versions, and a SHA-1 fingerprint of the project source **as this process imported it** —
+  snapshotted at first sighting, not re-hashed when the figure lands hours later, with any file
+  edited mid-run listed in `edited_during_run`. A figure whose fingerprint no longer matches the
+  tree is flagged.
+  Every `fig.savefig` call in `core/` and `studies/` was converted to `save_fig`, so runs record
+  themselves without further edits: `python3 -m studies.mmf_mode_profiles` now files the fibre
+  design, grid, wavelength and mode table alongside its figures.
+- **Inferred**, for the figures that predate this (148 of the current 151): attribution by scanning the scripts for
+  the `images/` directory they write to, plus the README table for scripts that save to the
+  working directory; staleness by comparing file times with the source. The page labels these
+  as inferred, because nothing on disk records their parameters.
+
+It also surfaces what `gsdfb.io.save_run` already saves: that `.npz` holds every scalar in the
+script's namespace (`I_DC`, `V_RF_AMP`, `N_PULSES`...), read without touching the arrays beside
+them. Crucially it says how far that reaches — `qkd_source` shows *"1181 values, covering 1 of 9
+figures here"*, because those files were written up to 119 days apart and three of them are in
+the thesis.
+
+What the index found when it was first run (18 September 2026): 155 figures, **26 used verbatim
+in the thesis**, 0 with recorded parameters, and directories mixing runs months apart
+(`qkd_source` 119 days, `carrier_transport` 111, `multimode` 110). After archiving the old
+results and the first recorded run it shows 151 figures and 3 recorded; the page always reports
+the live count, so treat these as the starting point rather than a fixed figure.
+
+### Source explorer
+
+The same server hosts a pulse-train explorer at http://localhost:8787/pulses, built on
+`app/pulse_lab.py`. Set the laser, the drive (f_rep, I_DC, I_RF, waveform shape) and the
+injection (SLD power and acceptance bandwidth, or S_inj directly); simulate; then move the
+analysis knobs -- AMZI phase psi, histogram bins, lag range, detector gate, Allan range, and
+whether to autocorrelate eta or port-A intensity -- without re-simulating.
+
+That split follows the measured costs. The kernel costs ~0.105 us per time step, so per-pulse
+cost scales with steps per period, 1/(f_rep dt): at dt = 0.5 ps, 10k pulses take 0.22 s at
+10 GHz but 2.05 s at 1 GHz. Re-analysing 10k pulses takes 4-10 ms on the server (the first
+analysis of a 1M-pulse run takes ~1.4 s, then knob changes reuse memoised pieces). Identical
+specifications reuse the cached run.
+
+- **Stable time steps only.** The kernel integrates the field with Euler-Maruyama, so a step near
+  the photon lifetime diverges to infinity: measured at dt/tau_p = 0.48 for the 150 um Chapter 5
+  laser, 0.45 for the 300 um one, 0.52 for the FP. dt is therefore capped at 0.35 tau_p per laser
+  (0.72 ps and 1.08 ps respectively, so `studies/qkd_sinj_sweep.py`'s 1 ps still runs), and the
+  arrays are checked for finiteness afterwards, since stability also depends on drive amplitude.
+  Before this, dt was a free 0.05-5 ps and a 1 ps run on the Chapter 5 laser produced all-inf
+  arrays that crashed the analysis with a numpy range error.
+- **Fidelity.** The Chapter 5 preset calls the kernel with exactly the argument list of
+  `run_config` in `studies/paper_10ghz_simulation.py`, and `tests/test_pulse_lab.py` checks the
+  arrays are byte-identical. The laser, sine drive and SLD conversion are imported from that study.
+- **High statistics** run in a spawned worker process, because the numba kernel holds the GIL
+  for its whole run (a ticker thread was starved for 1553 ms by a 1.55 s run). Runs are saved
+  as `.npz` under `$TMPDIR/source_explorer` and reload after a restart. Progress is an estimate
+  from the calibrated step cost: the kernel cannot report progress, and chunking it would reset
+  the laser state and corrupt the inter-pulse phase statistics. A 1M-pulse 10 GHz run finished
+  in 17.9 s against 18.1 s predicted.
+- **The verdict band** is the interval on the TRUE r1, taken as the larger of the Rayleigh
+  quantile (valid for uniform phases) and a data-driven half-width z sqrt(Var cos(dphi - arg r1)/M).
+  The Rayleigh quantile alone assumes Var(cos dphi) = 1/2; when dphi piles up near 0 and pi --
+  Chapter 5's partially-locked case -- the radial noise is sqrt(2) larger and it covers only 96.8%,
+  measured 97.0% against 99.5% for the band now used.
+- **Finite-sample verdict on r1.** For a perfectly random source, r1 over M = N-1 differences
+  is Rayleigh-distributed, and exceeds 0.01 with probability exp(-M 10^-4): **37% at 10k
+  pulses** (Monte Carlo 36%). So a 10k-pulse run cannot certify r1 < 0.01, and the page says
+  "unresolved" instead of "randomised" until N >= 46,053. The Chapter 5 operating point
+  (19 mW SLD, 8 nm) reads r1 = 0.0117 at 10k pulses (unresolved) and 0.0062 at 1M (resolved
+  below 0.01, though still above the 0.0021 bound for a random source).
+- **Arcsine comparison.** The eta histogram is compared with the ideal arcsine (Chapter 5) and
+  with the distribution uniform phase would give *with the simulated pulse energies*
+  (`eta_null_cdf`). The second leaves only the phase to explain any difference. A scaled-arcsine
+  fit was tried and rejected: the density diverges at the support edges, so a support error d
+  costs (2/pi) sqrt(d) in KS distance, and the fit's own statistical error gave KS 0.0185 on
+  ideal data where the true curve gives 0.0024.
+- **Autocorrelation** uses the Chapter 5 Pearson definition, but *not* its white-noise Bartlett
+  bound as the null. Both AMZI series are built from consecutive pulse pairs, so the pulse
+  energies alone put structure at lag 1: with perfectly random phases, I_A gives rho(1) = +0.0096
+  at the Chapter 5 point (CV_P = 0.186) against a Bartlett bound of 0.0058, i.e. the bound calls a
+  random source correlated, and worse as N grows because the leak is ~CV_P^2/2 whatever N while
+  the bound falls as 1/sqrt(N). The envelope is instead built from 12 surrogates with the phases
+  redrawn and the measured powers kept (per-lag mean plus 2.576 pooled sd); a random train leaves
+  0 of 100 lags outside it, and a phase-locked train still breaks it. KL divergence is
+  shown with its finite-sample bias (k-1)/(2 M ln 2), which at 128 bins and 10k pulses is
+  0.0092 bits -- most of a typical reading.
+- **Allan deviation** carries the reference sqrt(3) sigma_t / tau that independent arrival
+  times would give. Pulses slaved to the RF drive have white timing noise (slope -1), not
+  white frequency noise (slope -1/2). At the Chapter 5 point the measured curve sits on the
+  reference: 1.01 at tau = T, 1.00 at m = 1000.
+
 ### Core Simulations
 
 ```bash
@@ -513,6 +611,8 @@ python3 -m pinn.transfer_learning            # Transfer learning
 ```bash
 python3 -m tests.test_coherence_threshold
 python3 -m tests.test_threshold_sweep
+python3 tests/test_pulse_lab.py              # source explorer + new gsdfb.analysis functions
+python3 tests/test_provenance.py             # figure provenance, run browser, archiving
 ```
 
 ---
@@ -589,7 +689,26 @@ metrics = compute_metrics(phi, pk_S, pk_k, dt, laser)  # Full QKD metric dict
 from gsdfb.analysis import phase_randomisation_quality, absolute_jitter
 pq = phase_randomisation_quality(phi)     # r1, KL divergence, KS stat
 sigma_t, t_peak = absolute_jitter(pk_k, dt)
+
+from gsdfb.analysis import intensity_autocorrelation, bartlett_bound, eta_null_cdf, ks_distance
+lags, rho = intensity_autocorrelation(eta, max_lag=100)   # Chapter 5 Pearson rho(k), FFT
+bound = bartlett_bound(len(eta), 0.99)                    # 2.576 / sqrt(N)
+x, F = eta_null_cdf(peak_P)                               # eta CDF under uniform phase, these energies
+D, n = ks_distance(eta, lambda v: np.interp(v, x, F))
 ```
+
+Two estimators were corrected in September 2026; figures generated before then are affected:
+
+- `allan_deviation` differenced *adjacent* overlapping averages instead of averages separated
+  by tau. It read sqrt(2/3) low for white timing noise, and turned white frequency noise into
+  a tau^-1 slope (28x low at m = 837), so noise types could not be read off it. Now the
+  standard overlapping estimator from arrival times; tested against both noise types.
+  Affected: `images/timing_jitter/allan_deviation.png` and its notebook replot.
+- `core.million_pulse_comparison.phase_autocorrelation` took |Re| of a complex correlation.
+  Any train with a mean phase step per pulse was under-reported: 0.058 instead of 0.110 at
+  lag 1 for the free-running 2 GHz output, and 0.0 for a coherent train with a 90 degree step.
+  Now the modulus, normalised by N-k so lag 1 equals r1. Affected:
+  `images/1M_pulse_comparison/1M_phase_autocorrelation.png` and its coherence-length estimate.
 
 ### `gsdfb.plotting`
 ```python

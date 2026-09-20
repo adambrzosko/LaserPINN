@@ -19,6 +19,7 @@ from gsdfb.plotting import setup_plotting
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from gsdfb import save_fig
 
 
 # ── Gain-switching parameters ────────────────────────────────────────────────
@@ -523,13 +524,13 @@ if __name__ == '__main__':
           f"E_pulse = {pulse_energy*1e12:.2f} pJ")
 
     fig1 = plot_pulse_train(data, gs, laser)
-    fig1.savefig('gs_pulse_train.png', dpi=150)
+    save_fig(fig1, 'gs_pulse_train.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: gs_pulse_train.png")
 
     # ── 2. Optical spectrum ───────────────────────────────────────────────
     print("\n  2/6  Optical spectrum...")
     fig2 = plot_optical_spectrum(data, laser)
-    fig2.savefig('gs_spectrum.png', dpi=150)
+    save_fig(fig2, 'gs_spectrum.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: gs_spectrum.png")
 
     # ── 3. Field autocorrelation ──────────────────────────────────────────
@@ -540,7 +541,7 @@ if __name__ == '__main__':
     print(f"       |g^(1)(T_rep)| = {g1_abs[int(round(gs.T_rep/data['dt']))]:.4f}")
 
     fig3 = plot_field_autocorrelation(tau_g1, g1_abs, gs, tau_c)
-    fig3.savefig('gs_g1_autocorrelation.png', dpi=150)
+    save_fig(fig3, 'gs_g1_autocorrelation.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: gs_g1_autocorrelation.png")
 
     # ── 4. Intensity autocorrelation ──────────────────────────────────────
@@ -549,14 +550,14 @@ if __name__ == '__main__':
     print(f"       g^(2)(0) = {g2[0]:.2f}")
 
     fig4 = plot_intensity_autocorrelation(tau_g2, g2, gs)
-    fig4.savefig('gs_g2_autocorrelation.png', dpi=150)
+    save_fig(fig4, 'gs_g2_autocorrelation.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: gs_g2_autocorrelation.png")
 
     # ── 5. MZI output traces ─────────────────────────────────────────────
     print("\n  5/6  MZI output traces...")
     delays_ns = [0.10, 0.50, 1.00]
     fig5 = plot_mzi_traces(data, gs, delays_ns)
-    fig5.savefig('gs_mzi_traces.png', dpi=150)
+    save_fig(fig5, 'gs_mzi_traces.png', dpi=150, bbox_inches=None, pad_inches=None)
     print(f"       Delays: {delays_ns} ns")
     print("       Saved: gs_mzi_traces.png")
 
@@ -567,7 +568,7 @@ if __name__ == '__main__':
         tau_max=3 * gs.T_rep, n_delays=150, n_phase_steps=32,
     )
     fig6 = plot_mzi_visibility(tau_vis, vis, gs, tau_g1, g1_abs)
-    fig6.savefig('gs_mzi_visibility.png', dpi=150)
+    save_fig(fig6, 'gs_mzi_visibility.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: gs_mzi_visibility.png")
 
     # ── Summary ───────────────────────────────────────────────────────────

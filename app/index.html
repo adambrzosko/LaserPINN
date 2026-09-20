@@ -4,99 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fibre Workbench</title>
-<style>
-  :root {
-    --paper: #f5f6f8; --surface: #fff; --ink: #12161f; --muted: #646e7e;
-    --rule: #d9dde4; --copper: #a85d28; --copper-bg: #f6ede4; --teal: #2f6f6b;
-    --field-pos: #a85d28; --field-neg: #2f6f6b;
-    --mono: ui-monospace, "SF Mono", Menlo, monospace;
-    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #10141b; --surface: #161b24; --ink: #e6e9ef; --muted: #939cab;
-      --rule: #262d39; --copper: #d8823f; --copper-bg: #221a12; --teal: #58a29c;
-      --field-pos: #d8823f; --field-neg: #58a29c;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body);
-         font-size: 14px; line-height: 1.5; }
-  header { border-bottom: 1px solid var(--rule); padding: 14px 20px; display: flex;
-           align-items: baseline; gap: 14px; flex-wrap: wrap; background: var(--surface); }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-  header .sub { color: var(--muted); font-size: 12.5px; }
-  header .status { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  header .status.busy { color: var(--copper); }
-  header .status.err { color: #c0392b; }
-
-  .layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 0; align-items: start; }
-  @media (max-width: 880px) { .layout { grid-template-columns: minmax(0, 1fr); } }
-
-  .panel { border-right: 1px solid var(--rule); padding: 16px 18px 40px; }
-  @media (max-width: 880px) { .panel { border-right: 0; border-bottom: 1px solid var(--rule); } }
-  fieldset { border: 0; border-top: 1px solid var(--rule); margin: 0 0 4px; padding: 14px 0 10px; }
-  fieldset:first-of-type { border-top: 0; padding-top: 0; }
-  legend { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
-           color: var(--muted); padding: 0; margin-bottom: 8px; }
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .row.one { grid-template-columns: 1fr; }
-  /* [hidden] must win over .row's display:grid, which is more specific than the UA rule */
-  [hidden] { display: none !important; }
-  label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
-  input, select { width: 100%; padding: 6px 8px; font-family: var(--mono); font-size: 12.5px;
-                  background: var(--surface); color: var(--ink);
-                  border: 1px solid var(--rule); border-radius: 3px; }
-  input:focus-visible, select:focus-visible, button:focus-visible
-      { outline: 2px solid var(--copper); outline-offset: 1px; }
-  .check { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 12.5px; color: var(--ink); }
-  .check input { width: auto; }
-  button { font-family: var(--body); font-size: 13.5px; font-weight: 500; padding: 9px 14px;
-           border-radius: 3px; border: 1px solid var(--copper); background: var(--copper);
-           color: #fff; cursor: pointer; width: 100%; }
-  button.ghost { background: transparent; color: var(--copper); }
-  button:disabled { opacity: 0.5; cursor: default; }
-
-  .beam { border: 1px solid var(--rule); border-radius: 3px; padding: 10px; margin-bottom: 8px;
-          background: var(--surface); }
-  .beam .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .beam .head b { font-size: 12.5px; }
-  .beam .head button { width: auto; padding: 2px 7px; font-size: 11px; border-color: var(--rule);
-                       background: transparent; color: var(--muted); }
-
-  main { padding: 16px 20px 60px; min-width: 0; }
-  .facts { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--rule); border-radius: 3px;
-           overflow: hidden; background: var(--surface); margin-bottom: 14px; }
-  .facts div { flex: 1 1 110px; padding: 9px 12px; border-right: 1px solid var(--rule); }
-  .facts div:last-child { border-right: 0; }
-  .facts b { display: block; font-family: var(--mono); font-size: 15px; font-weight: 500; }
-  .facts span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
-  .card { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); padding: 12px 14px; }
-  .card h2 { font-size: 12.5px; margin: 0 0 2px; font-weight: 600; }
-  .card .cap { font-size: 11.5px; color: var(--muted); margin: 0 0 10px; }
-  canvas { width: 100%; height: auto; display: block; }
-  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
-  .legend i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; }
-
-  .tablewrap { overflow: auto; max-height: 260px; border: 1px solid var(--rule); border-radius: 3px; }
-  table { border-collapse: collapse; width: 100%; font-size: 12px; }
-  th, td { padding: 5px 9px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
-  th { position: sticky; top: 0; background: var(--surface); font-family: var(--mono); font-size: 10px;
-       letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
-  td { font-family: var(--mono); }
-  tr.sel td { background: var(--copper-bg); }
-  tr:hover td { cursor: pointer; color: var(--copper); }
-  .err { border: 1px solid #c0392b; background: #c0392b18; color: #c0392b; padding: 10px 12px;
-         border-radius: 3px; font-size: 12.5px; margin-bottom: 14px; white-space: pre-wrap;
-         font-family: var(--mono); }
-  .hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
-</style>
+<link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
 <header>
   <h1>Fibre Workbench</h1>
+  <nav class="tools" aria-label="Workbench tools">
+    <a href="/" aria-current="page">Fibre workbench</a><a href="/pulses">Source explorer</a><a href="/runs">Run browser</a>
+  </nav>
   <span class="sub">launch a beam into a fibre &middot; solver: <code>fiber/grin_modes.py</code> + <code>fiber/gmmnlse.py</code></span>
   <span class="status" id="status">ready</span>
 </header>
@@ -284,8 +199,8 @@
   </main>
 </div>
 
+<script src="/static/plot.js"></script>
 <script>
-const SERIES = ['#a85d28', '#2f6f6b', '#3b5b9b', '#8a4f7d', '#6b7280'];
 const $ = id => document.getElementById(id);
 let PRESETS = [], MODES = [], SELECTED = null, CUSTOM = false, PROFILE = null;
 
@@ -306,100 +221,6 @@ async function loadProfile() {
   });
   PROFILE = j.profile;
   drawProfile(j.profile); captionProfile(); describeProfile(j.profile);
-}
-
-/* ---------------- tiny canvas plotter (no dependencies) ---------------- */
-function css(v) { return getComputedStyle(document.body).getPropertyValue(v).trim(); }
-
-function plot(canvas, series, opts) {
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 620, H = opts.height || 360;
-  canvas.width = W * dpr; canvas.height = H * dpr;
-  canvas.style.height = H + 'px';
-  const g = canvas.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, W, H);
-  const L = 76, R = 14, T = 12, B = 40;   // L leaves room for tick labels AND the rotated title
-  const ink = css('--ink'), muted = css('--muted'), rule = css('--rule');
-
-  const live = series.filter(s => s.x.length);
-  if (!live.length) { g.fillStyle = muted; g.font = '12px system-ui';
-    g.fillText('run a propagation to see this', L, H / 2); return; }
-
-  let x0 = Math.min(...live.map(s => Math.min(...s.x)));
-  let x1 = Math.max(...live.map(s => Math.max(...s.x)));
-  let y0 = Math.min(...live.map(s => Math.min(...s.y)));
-  let y1 = Math.max(...live.map(s => Math.max(...s.y)));
-  if (opts.yFloor !== undefined) y0 = Math.max(y0, opts.yFloor);
-  // A flat trace (CW power, a constant spectrum) has zero range: pad relative to the
-  // value itself, never by a fixed +-1, which would put a power axis below zero.
-  if (!isFinite(x0) || !isFinite(x1) || x0 === x1) {
-    const dx = Math.abs(x0) * 0.05 || 1; x0 -= dx; x1 += dx;
-  }
-  if (!isFinite(y0) || !isFinite(y1) || y0 === y1) {
-    const dy = Math.abs(y0) * 0.25 || 1; y0 -= dy; y1 += dy;
-  }
-  const pad = (y1 - y0) * 0.08; y0 -= pad; y1 += pad;
-  if (opts.yMin0 && y0 < 0) y0 = 0;          // power cannot be negative
-  const sx = v => L + (v - x0) / (x1 - x0) * (W - L - R);
-  const sy = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
-
-  g.strokeStyle = rule; g.lineWidth = 1; g.fillStyle = muted; g.font = '10px ui-monospace, monospace';
-  for (let i = 0; i <= 4; i++) {
-    const yv = y0 + (y1 - y0) * i / 4, yy = Math.round(sy(yv)) + 0.5;
-    g.beginPath(); g.moveTo(L, yy); g.lineTo(W - R, yy); g.stroke();
-    g.textAlign = 'right'; g.textBaseline = 'middle';
-    g.fillText(fmt(yv, y1 - y0), L - 7, yy);
-  }
-  for (let i = 0; i <= 4; i++) {
-    const xv = x0 + (x1 - x0) * i / 4, xx = Math.round(sx(xv)) + 0.5;
-    g.textAlign = 'center'; g.textBaseline = 'top';
-    g.fillText(fmt(xv, x1 - x0), xx, H - B + 7);
-  }
-  g.strokeStyle = rule;
-  g.beginPath(); g.moveTo(L, T); g.lineTo(L, H - B); g.lineTo(W - R, H - B); g.stroke();
-
-  g.fillStyle = muted; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
-  g.fillText(opts.xlabel || '', (L + W - R) / 2, H - 10);
-  g.save(); g.translate(12, (T + H - B) / 2); g.rotate(-Math.PI / 2);
-  g.textBaseline = 'top'; g.fillText(opts.ylabel || '', 0, 0); g.restore();
-
-  live.forEach((s, i) => {
-    g.strokeStyle = s.color || SERIES[i % SERIES.length];
-    g.lineWidth = s.width || 1.6;
-    if (s.dash) g.setLineDash(s.dash); else g.setLineDash([]);
-    g.beginPath();
-    let started = false;
-    for (let k = 0; k < s.x.length; k++) {
-      const yv = Math.max(s.y[k], y0);
-      if (!isFinite(yv)) { started = false; continue; }
-      const px = sx(s.x[k]), py = sy(yv);
-      if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
-    }
-    g.stroke(); g.setLineDash([]);
-    if (s.dots) {
-      g.fillStyle = s.color || SERIES[i % SERIES.length];
-      for (let k = 0; k < s.x.length; k++)
-        { g.beginPath(); g.arc(sx(s.x[k]), sy(s.y[k]), 2.6, 0, 7); g.fill(); }
-    }
-  });
-}
-
-/* Format a tick against the axis RANGE, not its own magnitude: two neighbouring ticks
-   must never round to the same string (0.001 and 0.001 for a 7e-4 span). */
-function fmt(v, range) {
-  const a = Math.abs(v);
-  if (a < (range || 1) * 1e-9) return '0';
-  const span = range || a || 1;
-  if (span >= 1e4 || span < 1e-3 || a >= 1e5)
-    return v.toExponential(Math.abs(v) >= 1 ? 2 : 1).replace('e+', 'e');
-  const decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(span / 4)) + 1));
-  return v.toFixed(decimals);
-}
-
-function legend(el, labels, colors) {
-  el.innerHTML = labels.map((l, i) =>
-    `<span><i style="background:${colors ? colors[i] : SERIES[i % SERIES.length]}"></i>${l}</span>`).join('');
 }
 
 /* ---------------- mode profile heat map ---------------- */
@@ -584,6 +405,7 @@ function drawDispersion() {
     x: DISP.wavelength_nm.filter((_, k) => m[q][k] !== null),
     y: m[q].filter(v => v !== null),
     color: SERIES[i % SERIES.length],
+    label: m.label,
   }));
   plot($('cv-disp'), series, {
     xlabel: 'wavelength (nm)',
@@ -684,11 +506,11 @@ function render(j) {
   $('f-steps').textContent = j.steps + (j.rejected ? ` (${j.rejected} rej)` : '');
   const labels = j.labels;
 
-  plot($('cv-spec'), j.spectrum.dBm_per_nm.map((y, i) => ({ x: j.spectrum.wavelength_nm, y })),
+  plot($('cv-spec'), j.spectrum.dBm_per_nm.map((y, i) => ({ x: j.spectrum.wavelength_nm, y, label: labels[i] })),
        { xlabel: 'wavelength (nm)', ylabel: 'dBm / nm', yFloor: -120 });
   legend($('lg-spec'), labels);
 
-  plot($('cv-time'), j.time.power_W.map((y, i) => ({ x: j.time.t_ps, y })),
+  plot($('cv-time'), j.time.power_W.map((y, i) => ({ x: j.time.t_ps, y, label: labels[i] })),
        { xlabel: j.time.axis_label || 'time (ps)', ylabel: 'power (W)', yMin0: true });
   legend($('lg-time'), labels);
   if (j.frame) {
@@ -714,7 +536,7 @@ function render(j) {
     zser.push({ x: j.z_km, y, color: SERIES[i % SERIES.length], dash: [5, 3], width: 1.2 });
     znames.push(`${labels[i]} window avg`);
   });
-  plot($('cv-z'), zser, { xlabel: 'distance (km)', ylabel: 'power (mW)', yMin0: true });
+  plot($('cv-z'), zser, { xlabel: 'distance (km)', ylabel: 'power (mW)', yMin0: true, labels: znames });
   legend($('lg-z'), znames, zser.map(s => s.color));
   const allCW = j.time.power_W.every(row => {
     const mx = Math.max(...row), mn = Math.min(...row);
@@ -735,7 +557,7 @@ function render(j) {
         names.push(`${j.noise.labels[i]} backward`);
       });
     }
-    plot($('cv-noise'), series, { xlabel: 'wavelength (nm)', ylabel: 'dBm / nm', yFloor: -160 });
+    plot($('cv-noise'), series, { xlabel: 'wavelength (nm)', ylabel: 'dBm / nm', yFloor: -160, labels: names });
     legend($('lg-noise'), names);
     $('noisecap').textContent = j.noise.backward_dBm_per_nm
       ? 'Forward (solid) and counter-propagating (dashed) spontaneous Raman PSD.'
@@ -792,6 +614,7 @@ $('profview').addEventListener('change', () => { if (PROFILE) drawProfile(PROFIL
 $('profvec').addEventListener('change', loadProfile);
 $('controls').addEventListener('submit', runPropagation);
 window.addEventListener('resize', () => { if (MODES.length) renderAgain(); });
+window.addEventListener('themechange', () => { renderAgain(); drawDispersion(); if (PROFILE) drawProfile(PROFILE); });
 let LAST = null;
 const _render = render; render = j => { LAST = j; _render(j); };
 function renderAgain() { if (LAST) _render(LAST); }

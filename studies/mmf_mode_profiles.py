@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from gsdfb import save_fig
 import numpy as np
 
 from fiber.constants import c
@@ -138,7 +139,7 @@ def run():
                   f'(core outlined, {2 * BOX_UM:.0f} '
                   r'$\mu$m box; red/blue = field sign)', fontsize=13)
     fig1.tight_layout()
-    fig1.savefig(OUT / 'mmf_lp_mode_profiles.png', dpi=150, bbox_inches='tight')
+    save_fig(fig1, OUT / 'mmf_lp_mode_profiles.png', dpi=150, bbox_inches='tight')
 
     # ---- figure 1b: the same modes as intensity, to sit beside a measured near field ---
     fig1b, axes1b = plt.subplots(3, 3, figsize=(10.5, 10.5))
@@ -153,7 +154,7 @@ def run():
     fig1b.suptitle(f'LP mode intensities of OM3 at {WAVELENGTH * 1e9:.0f} nm '
                    f'(core outlined, {2 * BOX_UM:.0f} ' r'$\mu$m box)', fontsize=13)
     fig1b.tight_layout()
-    fig1b.savefig(OUT / 'mmf_lp_mode_intensity.png', dpi=150, bbox_inches='tight')
+    save_fig(fig1b, OUT / 'mmf_lp_mode_intensity.png', dpi=150, bbox_inches='tight')
 
     # ---- figure 2: principal mode groups ----------------------------------------------
     fig2, (axa, axb) = plt.subplots(1, 2, figsize=(13, 5))
@@ -174,7 +175,7 @@ def run():
                   f'({2 * len(modes)} with polarisation)', fontsize=12)
     axb.legend(fontsize=10)
     fig2.tight_layout()
-    fig2.savefig(OUT / 'mmf_mode_groups.png', dpi=150, bbox_inches='tight')
+    save_fig(fig2, OUT / 'mmf_mode_groups.png', dpi=150, bbox_inches='tight')
 
     # ---- data -------------------------------------------------------------------------
     np.savez(DATA / 'profiles.npz', x_um=g * 1e6, y_um=g * 1e6, fields=fields,

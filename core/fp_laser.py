@@ -38,6 +38,7 @@ class FPLaserParams:
     a: float = 2.5e-20               # differential gain (m²)
     N_tr: float = 1.5e24             # transparency carrier density (m⁻³)
     epsilon: float = 3e-23           # gain compression factor (m³)
+    theta_cross: float = 1.0         # cross/self saturation ratio; <1 sustains multimode lasing
 
     # Gain bandwidth (parabolic/Gaussian profile)
     gain_bw: float = 40e-9           # gain FWHM (m), typ. 30-50 nm for InGaAsP
@@ -137,6 +138,9 @@ def solve_fp_stochastic(
     S_inj_density: float = 0.0,
     seed: Optional[int] = None,
     carrier_noise_scale: float = 1.0,
+    spont_gain_weighted: bool = False,
+    fwm_coupling: float = 0.0,
+    fast_gain: float = 0.0,
 ):
     """Euler-Maruyama solver for M-mode FP laser, complex-field formulation.
 
@@ -212,8 +216,13 @@ def solve_fp_stochastic(
         I = I_func(t_eval[k])
 
         # Gain per mode: spectral profile × material gain with cross-saturation
-        g_mat = params.a * (Nk - params.N_tr) / (1 + params.epsilon * S_total)
-        g_j = g_mat * G_j
+        g0 = params.a * (Nk - params.N_tr)
+        g_mat = g0 / (1 + params.epsilon * S_total)
+        if params.theta_cross == 1.0:
+            g_j = g_mat * G_j
+        else:
+            g_j = g0 * G_j / (1 + params.epsilon *
+                              (S_j + params.theta_cross * (S_total - S_j)))
 
         # Recombination
         R_sp = params.A_nr * Nk + params.B * Nk**2 + params.C_aug * Nk**3
@@ -221,6 +230,10 @@ def solve_fp_stochastic(
         # beta_sp is the fraction coupling into ONE mode (same convention as
         # core/sld_injection.py), so every mode gets the full rate - no /M.
         R_sp_mode = params.beta_sp * params.B * Nk**2
+        if spont_gain_weighted:
+            # flat seeding over-populates the low-gain wings, which is what
+            # stops r1 converging as the tracked window widens
+            R_sp_mode = R_sp_mode * G_j
 
         # ── Field update: complex gain carries the alpha_H phase-amplitude coupling ──
         net_gain_j = 0.5 * (1 + 1j * params.alpha_H) * (
@@ -232,9 +245,31 @@ def solve_fp_stochastic(
         # Mode frequency offsets: each mode rotates at its own rate
         E = E * np.exp(1j * domega_j * dt)
 
+        if fast_gain:
+            # Gain saturates on the INSTANTANEOUS intracavity intensity, not the
+            # period average, so sub-ps nonlinearities follow the intermode beat.
+            # Complex coefficient (amplitude + alpha_H phase) exchanges energy
+            # between modes, which is what locks their phases.
+            a = np.fft.ifft(E, norm='ortho')
+            I_eff = fast_gain * M * np.abs(a)**2 + (1.0 - fast_gain) * S_total
+            g0 = params.a * (Nk - params.N_tr)
+            dg = g0 / (1 + params.epsilon * I_eff) - g_mat
+            a = a * np.exp(0.5 * (1 + 1j * params.alpha_H) *
+                           params.Gamma * params.v_g * dg * dt)
+            E = np.fft.fft(a, norm='ortho')
+
+        if fwm_coupling:
+            # equal mode spacing phase-matches 2*w_m = w_(m+1) + w_(m-1), so the Kerr
+            # term couples mode phases. Split-step: the nonlinear phase is diagonal in
+            # the beat-time domain, where exponentiating it conserves energy exactly.
+            a = np.fft.ifft(E, norm='ortho')
+            kerr = fwm_coupling * params.epsilon * params.Gamma * params.v_g * g_mat
+            a = a * np.exp(1j * kerr * np.abs(a)**2 * dt)
+            E = np.fft.fft(a, norm='ortho')
+
         # ── Random-phase phasor additions ──
         # Spontaneous emission (independent per mode)
-        E += np.sqrt(max(R_sp_mode, 0.0)) * sqrt_half_dt * (
+        E += np.sqrt(np.maximum(R_sp_mode, 0.0)) * sqrt_half_dt * (
             rng.standard_normal(M) + 1j * rng.standard_normal(M)
         )
         # Broadband SLD injection (incoherent across modes)
@@ -283,6 +318,9 @@ def gain_switch_fp(
     seed: Optional[int] = None,
     warmup_pulses: int = 20,
     carrier_noise_scale: float = 1.0,
+    spont_gain_weighted: bool = False,
+    fwm_coupling: float = 0.0,
+    fast_gain: float = 0.0,
 ):
     """Gain-switch the FP laser and return per-pulse, per-mode peak fields.
 
@@ -339,6 +377,9 @@ def gain_switch_fp(
         params, I_func, (0, t_total), dt=dt,
         S_inj_density=S_inj_density, seed=seed,
         carrier_noise_scale=carrier_noise_scale,
+        spont_gain_weighted=spont_gain_weighted,
+        fwm_coupling=fwm_coupling,
+        fast_gain=fast_gain,
     )
 
     t = sol['t']
@@ -352,6 +393,7 @@ def gain_switch_fp(
     phi_peak = np.zeros((n_pulses, M))
     S_peak_total = np.zeros(n_pulses)
     t_peak = np.zeros(n_pulses)
+    k_offset = np.zeros(n_pulses, dtype=int)
 
     steps_per_period = int(T_rep / dt)
 
@@ -370,10 +412,18 @@ def gain_switch_fp(
         phi_peak[p, :] = phi[i_pk, :]
         S_peak_total[p] = S_total[i_pk]
         t_peak[p] = t[i_pk]
+        k_offset[p] = i_pk - i_start
 
         E_peak[p, :] = sol['E'][i_pk, :]
 
+    # An AMZI compares E(t) with E(t - T) at a fixed delay; sampling at each pulse's
+    # own peak adds a spurious phase dw_j * (peak jitter) that scrambles side modes.
+    k_fix = int(np.median(k_offset))
+    idx = (warmup_pulses + np.arange(n_pulses)) * steps_per_period + k_fix
+    E_fixed = sol['E'][np.minimum(idx, len(t) - 1), :]
+
     return {
+        'E_fixed': E_fixed,
         'E_peak': E_peak,
         'S_peak': S_peak,
         'phi_peak': phi_peak,

@@ -19,11 +19,16 @@ and the fibre panel responds immediately. A single-mode 10 km propagation on a 2
 grid is 0.08 s, so runs are synchronous -- except when noise is accumulated over every
 guided mode, which is the expensive case (tens of seconds), and is therefore capped and
 clearly labelled in the UI.
+
+The same server hosts the source explorer at /pulses (app/pulse_lab.py): a gain-switched DFB
+pulse train simulated once and re-analysed on every knob change. Its kernel and analysis
+modules are imported by a warm-up thread at start, so the fibre pages never wait on numba.
 """
 import argparse
 import json
 import math
 import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,6 +45,11 @@ from fiber.raman_models import BlowWood, LinAgrawal
 from fiber.vector_modes import constituents, label as vector_label, radial_azimuthal, vector_field
 
 HERE = Path(__file__).resolve().parent
+IMAGES = HERE.parent / 'images'
+STATIC = {'plot.js': 'application/javascript; charset=utf-8', 'theme.css': 'text/css; charset=utf-8'}
+IMAGE_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml'}
+_runs_cache = {}
+_runs_lock = threading.Lock()
 MAX_POINTS = 1200          # downsample every trace to this before sending
 MODE_GRID = 121            # 2D profile resolution (121x121 keeps the payload ~120 kB)
 _cache = {}
@@ -518,9 +528,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_GET(self):
-        if self.path in ('/', '/index.html'):
+        path = self.path.split('?', 1)[0]
+        if path in ('/', '/index.html'):
             html = (HERE / 'index.html').read_bytes()
             return self._send(200, html, 'text/html; charset=utf-8')
+        if path in ('/pulses', '/pulses.html'):
+            return self._send(200, (HERE / 'pulses.html').read_bytes(), 'text/html; charset=utf-8')
+        if path in ('/runs', '/runs.html'):
+            return self._send(200, (HERE / 'runs.html').read_bytes(), 'text/html; charset=utf-8')
+        if path.startswith('/figures/'):
+            return self._send_figure(path[len('/figures/'):])
+        if path.startswith('/api/runs'):
+            return self._runs_get(path)
+        if path.startswith('/static/') and path[len('/static/'):] in STATIC:
+            name = path[len('/static/'):]
+            return self._send(200, (HERE / 'static' / name).read_bytes(), STATIC[name])
+        if path.startswith('/api/pulses/'):
+            return self._pulses_get(path)
         if self.path == '/api/fibres':
             return self._send(200, {
                 'presets': [{
@@ -566,10 +590,97 @@ class Handler(BaseHTTPRequestHandler):
                                                          n2=float(req.get('n2', 2.6e-20))))
             if self.path == '/api/propagate':
                 return self._send(200, run_propagation(req))
+            if self.path.startswith('/api/pulses/'):
+                return self._pulses_post(self.path, req)
             return self._send(404, {'error': 'not found'})
         except Exception as exc:                          # surface the real reason in the UI
             return self._send(400, {'error': f'{type(exc).__name__}: {exc}',
                                     'trace': traceback.format_exc(limit=3)})
+
+    # -- run browser -----------------------------------------------------------------
+    def _send_figure(self, relative):
+        """Serve one figure out of images/. Only image files, and only inside images/: the path
+        is resolved and checked, so ../ cannot walk out of it."""
+        from urllib.parse import unquote
+        try:
+            target = (IMAGES / unquote(relative)).resolve()
+            target.relative_to(IMAGES.resolve())
+        except (ValueError, OSError):
+            return self._send(403, {'error': 'outside the images directory'})
+        if not target.is_file() or target.suffix.lower() not in IMAGE_TYPES:
+            return self._send(404, {'error': 'not an image in images/'})
+        return self._send(200, target.read_bytes(), IMAGE_TYPES[target.suffix.lower()])
+
+    def _runs_get(self, path):
+        from gsdfb import provenance
+        try:
+            if path == '/api/runs':
+                with _runs_lock:
+                    fresh = _runs_cache.get('index') if (
+                        time.time() - _runs_cache.get('at', 0) < 20) else None
+                    if fresh is None:
+                        fresh = provenance.index()
+                        _runs_cache.update(index=fresh, at=time.time())
+                return self._send(200, fresh)
+            if path == '/api/runs/cleanup':
+                candidates = provenance.cleanup_candidates()
+                return self._send(200, {'candidates': candidates,
+                                        'total_bytes': sum(c['bytes'] for c in candidates)})
+            return self._send(404, {'error': 'not found'})
+        except Exception as exc:
+            return self._send(400, {'error': f'{type(exc).__name__}: {exc}'})
+
+    # -- source explorer -------------------------------------------------------------
+    def _pulses_get(self, path):
+        try:
+            lab = pulse_lab()
+            if path == '/api/pulses/meta':
+                return self._send(200, lab.meta())
+            if path == '/api/pulses/jobs':
+                return self._send(200, {'jobs': lab.JOBS.list()})
+            if path == '/api/pulses/datasets':
+                return self._send(200, {'datasets': lab.REGISTRY.listing()})
+            return self._send(404, {'error': 'not found'})
+        except Exception as exc:
+            return self._send(400, {'error': f'{type(exc).__name__}: {exc}'})
+
+    def _pulses_post(self, path, req):
+        lab = pulse_lab()
+        if path == '/api/pulses/estimate':
+            return self._send(200, lab.estimate(req.get('spec')))
+        if path == '/api/pulses/simulate':
+            try:
+                ds, reused = lab.simulate(req.get('spec'))
+            except lab.TooSlow as exc:
+                return self._send(409, {'error': str(exc), 'predicted_s': exc.predicted,
+                                        'background': True})
+            return self._send(200, {'reused': reused, 'analysis': lab.analyse(ds, req.get('knobs'))})
+        if path == '/api/pulses/analyse':
+            try:
+                ds = lab.REGISTRY.get(str(req.get('dataset_id')))
+            except KeyError as exc:
+                return self._send(404, {'error': exc.args[0]})
+            return self._send(200, lab.analyse(ds, req.get('knobs')))
+        if path == '/api/pulses/jobs':
+            return self._send(200, {'job': lab.JOBS.submit(req.get('spec'))})
+        if path == '/api/pulses/jobs/cancel':
+            return self._send(200, {'job': lab.JOBS.cancel(str(req.get('id')))})
+        return self._send(404, {'error': 'not found'})
+
+
+_pulse_lab = None
+_pulse_lab_lock = threading.Lock()
+
+
+def pulse_lab():
+    """The source-explorer module, imported on first use: it loads numba, the kernel and the
+    Chapter 5 study, ~2 s, which the fibre pages should never pay for."""
+    global _pulse_lab
+    with _pulse_lab_lock:
+        if _pulse_lab is None:
+            from app import pulse_lab as module
+            _pulse_lab = module
+        return _pulse_lab
 
 
 def main():
@@ -579,10 +690,18 @@ def main():
     args = ap.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f'Fibre workbench on http://{args.host}:{args.port}  (Ctrl-C to stop)')
+    print(f'Source explorer on http://{args.host}:{args.port}/pulses')
+    print(f'Run browser     on http://{args.host}:{args.port}/runs')
+    # Import and compile the pulse kernel in the background: the fibre pages serve at once,
+    # and the first source-explorer run does not pay the ~3 s import + numba compile.
+    threading.Thread(target=lambda: pulse_lab().warm(), daemon=True, name='pulse-warmup').start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print('\nstopped')
+    finally:
+        if _pulse_lab is not None:
+            _pulse_lab.JOBS.shutdown()
 
 
 if __name__ == '__main__':

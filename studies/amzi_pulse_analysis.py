@@ -26,6 +26,7 @@ from core.sld_injection import (
     solve_sld_steady_state, sld_to_injection_field,
 )
 from core.million_pulse_comparison import simulate_pulses
+from gsdfb import save_fig
 
 
 # ── AMZI functions ───────────────────────────────────────────────────────────
@@ -168,7 +169,7 @@ if __name__ == '__main__':
 
     plt.colorbar(im, ax=axes1[1], label='Probability density', shrink=0.8)
     plt.tight_layout()
-    fig1.savefig('images/amzi/amzi_splitting_ratio_map.png', dpi=150)
+    save_fig(fig1, 'images/amzi/amzi_splitting_ratio_map.png', dpi=150)
     print("  Saved: images/amzi/amzi_splitting_ratio_map.png")
 
     # ── Figure 2: Splitting-ratio histograms at selected frequencies ─────
@@ -217,7 +218,7 @@ if __name__ == '__main__':
         axes2[0, col].legend(fontsize=7, loc='upper left')
 
     plt.tight_layout()
-    fig2.savefig('images/amzi/amzi_splitting_histograms.png', dpi=150)
+    save_fig(fig2, 'images/amzi/amzi_splitting_histograms.png', dpi=150)
     print("  Saved: images/amzi/amzi_splitting_histograms.png")
 
     # ── Figure 3: Port intensity distributions ───────────────────────────
@@ -257,7 +258,7 @@ if __name__ == '__main__':
         axes3[1, col].set_xlabel('Output power (mW)')
 
     plt.tight_layout()
-    fig3.savefig('images/amzi/amzi_port_distributions.png', dpi=150)
+    save_fig(fig3, 'images/amzi/amzi_port_distributions.png', dpi=150)
     print("  Saved: images/amzi/amzi_port_distributions.png")
 
     # ── Figure 4: Visibility & fringe curve ──────────────────────────────
@@ -318,7 +319,7 @@ if __name__ == '__main__':
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig4.savefig('images/amzi/amzi_visibility_summary.png', dpi=150)
+    save_fig(fig4, 'images/amzi/amzi_visibility_summary.png', dpi=150)
     print("  Saved: images/amzi/amzi_visibility_summary.png")
 
     # ── Figure 5: Extinction ratio histogram ─────────────────────────────
@@ -360,7 +361,7 @@ if __name__ == '__main__':
         axes5[1, col].set_xlabel('Extinction ratio (dB)')
 
     plt.tight_layout()
-    fig5.savefig('images/amzi/amzi_extinction_ratio.png', dpi=150)
+    save_fig(fig5, 'images/amzi/amzi_extinction_ratio.png', dpi=150)
     print("  Saved: images/amzi/amzi_extinction_ratio.png")
 
     # ── Summary ──────────────────────────────────────────────────────────

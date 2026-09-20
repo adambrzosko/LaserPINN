@@ -19,6 +19,7 @@ from gsdfb import setup_plotting
 from gsdfb.analysis import absolute_jitter, period_jitter, allan_deviation
 from core.dfb_laser import make_laser, q, h, c
 from core.million_pulse_comparison import simulate_pulses_waveform
+from gsdfb import save_fig
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig1.savefig('images/timing_jitter/jitter_vs_freq.png', dpi=150)
+    save_fig(fig1, 'images/timing_jitter/jitter_vs_freq.png', dpi=150)
     print("  Saved: images/timing_jitter/jitter_vs_freq.png")
 
     # ── Figure 2: Peak arrival distributions ─────────────────────────────
@@ -226,7 +227,7 @@ if __name__ == '__main__':
         axes2[1, col].set_xlabel('Peak time (ps)')
 
     plt.tight_layout()
-    fig2.savefig('images/timing_jitter/arrival_distributions.png', dpi=150)
+    save_fig(fig2, 'images/timing_jitter/arrival_distributions.png', dpi=150)
     print("  Saved: images/timing_jitter/arrival_distributions.png")
 
     # ── Figure 3: Trade-off — timing jitter vs phase jitter ──────────────
@@ -286,7 +287,7 @@ if __name__ == '__main__':
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig3.savefig('images/timing_jitter/jitter_tradeoff.png', dpi=150)
+    save_fig(fig3, 'images/timing_jitter/jitter_tradeoff.png', dpi=150)
     print("  Saved: images/timing_jitter/jitter_tradeoff.png")
 
     # ── Figure 4: Correlations at 10 GHz ─────────────────────────────────
@@ -344,7 +345,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig4.savefig('images/timing_jitter/correlations_10GHz.png', dpi=150)
+    save_fig(fig4, 'images/timing_jitter/correlations_10GHz.png', dpi=150)
     print("  Saved: images/timing_jitter/correlations_10GHz.png")
 
     # ── Figure 5: Allan deviation ────────────────────────────────────────
@@ -377,7 +378,7 @@ if __name__ == '__main__':
                   'k--', lw=0.8, alpha=0.4, label='$\\tau^{-1/2}$')
 
     plt.tight_layout()
-    fig5.savefig('images/timing_jitter/allan_deviation.png', dpi=150)
+    save_fig(fig5, 'images/timing_jitter/allan_deviation.png', dpi=150)
     print("  Saved: images/timing_jitter/allan_deviation.png")
 
     # ── Summary table ────────────────────────────────────────────────────

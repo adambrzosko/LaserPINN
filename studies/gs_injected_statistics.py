@@ -51,6 +51,7 @@ from core.sld_injection import (
 from core.gain_switched_interference import (
     GainSwitchParams, make_gain_switch_current, simulate_pulse_train,
 )
+from gsdfb import save_fig
 
 
 # ── Vectorised gain-switch current waveform ─────────────────────────────────
@@ -362,7 +363,7 @@ def plot_distribution(S_free, S_inj, laser, gs, title_extra='',
 
     plt.tight_layout()
     fname = f'{prefix}_distribution.png'
-    fig.savefig(fname, dpi=130)
+    save_fig(fig, fname, dpi=130)
     plt.close(fig)
     return fname
 
@@ -453,7 +454,7 @@ def plot_autocorrelation(S_free, S_inj, gs, title_extra='',
 
     plt.tight_layout()
     fname = f'{prefix}_autocorrelation.png'
-    fig.savefig(fname, dpi=130)
+    save_fig(fig, fname, dpi=130)
     plt.close(fig)
     return fname
 

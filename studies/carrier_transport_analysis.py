@@ -481,7 +481,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig1.savefig('images/carrier_transport/freq_comparison.png', dpi=150)
+    save_fig(fig1, 'images/carrier_transport/freq_comparison.png', dpi=150)
     print("  Saved: images/carrier_transport/freq_comparison.png")
 
     # ── Figure 2: tau_cap sweep at 10 GHz ────────────────────────────────
@@ -530,7 +530,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig2.savefig('images/carrier_transport/tau_cap_sweep_10GHz.png', dpi=150)
+    save_fig(fig2, 'images/carrier_transport/tau_cap_sweep_10GHz.png', dpi=150)
     print("  Saved: images/carrier_transport/tau_cap_sweep_10GHz.png")
 
     # ── Figure 3: Relative change — what transport costs ─────────────────
@@ -584,7 +584,7 @@ if __name__ == '__main__':
         ax.set_xticks(f_ghz)
 
     plt.tight_layout()
-    fig3.savefig('images/carrier_transport/transport_impact.png', dpi=150)
+    save_fig(fig3, 'images/carrier_transport/transport_impact.png', dpi=150)
     print("  Saved: images/carrier_transport/transport_impact.png")
 
     # ── Figure 4: Power and extinction ───────────────────────────────────
@@ -616,7 +616,7 @@ if __name__ == '__main__':
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig4.savefig('images/carrier_transport/power_impact.png', dpi=150)
+    save_fig(fig4, 'images/carrier_transport/power_impact.png', dpi=150)
     print("  Saved: images/carrier_transport/power_impact.png")
 
     plt.close('all')

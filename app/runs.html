@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Browser</title>
+<link rel="stylesheet" href="/static/theme.css">
+<style>
+  .studies { display: grid; gap: 2px; }
+  .studies button { width: 100%; text-align: left; background: transparent; color: var(--ink);
+                    border: 1px solid transparent; border-radius: 3px; padding: 7px 9px; font-size: 12.5px; }
+  .studies button:hover { background: var(--paper); }
+  .studies button[aria-current="true"] { background: var(--copper-bg); border-color: var(--rule); }
+  .studies b { display: block; font-weight: 600; }
+  .studies small { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+  .filters button { width: auto; padding: 4px 9px; font-size: 11.5px; background: transparent;
+                    color: var(--muted); border-color: var(--rule); }
+  .filters button[aria-pressed="true"] { background: var(--copper); color: #fff; border-color: var(--copper); }
+
+  .runhead { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface);
+             padding: 12px 14px; margin-bottom: 14px; }
+  .runhead h2 { margin: 0 0 4px; font-size: 14px; }
+  .runhead p { margin: 0; font-size: 12px; color: var(--muted); }
+  .runhead .warn { color: var(--warn); }
+
+  .fig { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); overflow: hidden; }
+  .fig img { width: 100%; display: block; background: #fff; border-bottom: 1px solid var(--rule);
+             max-height: 260px; object-fit: contain; }
+  .fig .body { padding: 10px 12px; }
+  .fig h3 { margin: 0 0 4px; font-size: 12.5px; font-family: var(--mono); word-break: break-all; }
+  .fig .meta { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .badges { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+  .badge { font-size: 10.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 10px;
+           border: 1px solid currentColor; }
+  .badge.thesis { color: var(--s3); } .badge.rec { color: var(--good); }
+  .badge.inf { color: var(--muted); } .badge.stale { color: var(--warn); }
+  .badge.orphan { color: var(--bad); }
+  .params { margin-top: 8px; font-size: 11.5px; }
+  .params summary { cursor: pointer; color: var(--muted); font-size: 11px; }
+  .params table { margin-top: 6px; }
+  .params td:first-child { color: var(--muted); width: 42%; }
+  .note { font-size: 11.5px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
+  .data-list { font-family: var(--mono); font-size: 11.5px; }
+  .data-list td:last-child { text-align: right; color: var(--muted); }
+  .totals { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--rule); border-radius: 3px;
+            overflow: hidden; background: var(--surface); margin-bottom: 14px; }
+  .totals div { flex: 1 1 96px; padding: 8px 11px; border-right: 1px solid var(--rule); }
+  .totals div:last-child { border-right: 0; }
+  .totals b { display: block; font-family: var(--mono); font-size: 15px; font-weight: 500; }
+  .totals span { font-size: 10.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Run Browser</h1>
+  <nav class="tools" aria-label="Workbench tools">
+    <a href="/">Fibre workbench</a><a href="/pulses">Source explorer</a><a href="/runs" aria-current="page">Run browser</a>
+  </nav>
+  <span class="sub">what produced each figure in <code>images/</code>, and whether the code has moved on since</span>
+  <span class="status busy" id="status">loading…</span>
+</header>
+
+<div class="layout">
+  <aside class="panel">
+    <fieldset>
+      <legend>Studies</legend>
+      <div class="studies" id="studies"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Housekeeping</legend>
+      <div class="studies"><button type="button" id="cleanupbtn">
+        <b>Cleanup candidates</b><small id="cleanupcount">—</small></button></div>
+      <p class="hint">Nothing is deleted from this page. It lists what is safe to archive and why.</p>
+    </fieldset>
+  </aside>
+
+  <main>
+    <div id="error" class="err" hidden></div>
+    <div class="totals" id="totals"></div>
+    <div class="filters" id="filters">
+      <button type="button" data-filter="all" aria-pressed="true">All files</button>
+      <button type="button" data-filter="thesis" aria-pressed="false">In the thesis</button>
+      <button type="button" data-filter="stale" aria-pressed="false">Code changed since</button>
+      <button type="button" data-filter="unrecorded" aria-pressed="false">No recorded parameters</button>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let INDEX = null, STUDY = null, FILTER = 'all', CLEANUP = null;
+
+const kB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} kB`
+              : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`;
+const when = t => new Date(t * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const days = t => Math.round((Date.now() / 1000 - t) / 86400);
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/runs');
+    INDEX = await r.json();
+    if (!r.ok) throw new Error(INDEX.error || 'failed');
+  } catch (err) { $('error').hidden = false; $('error').textContent = err.message; return; }
+  renderTotals(); renderStudies();
+  STUDY = INDEX.studies.find(s => s.in_thesis) || INDEX.studies[0];
+  renderStudy();
+  $('status').textContent = `${INDEX.totals.studies} studies · ${kB(INDEX.totals.bytes)}`;
+  $('status').className = 'status';
+  fetch('/api/runs/cleanup').then(r => r.json()).then(j => {
+    CLEANUP = j.candidates;
+    $('cleanupcount').textContent = `${j.candidates.length} files · ${kB(j.total_bytes)}`;
+  });
+}
+
+function renderTotals() {
+  const t = INDEX.totals, box = $('totals');
+  box.textContent = '';
+  [[t.studies, 'studies'], [t.figures, 'figures'], [t.data, 'data files'], [kB(t.bytes), 'on disk'],
+   [t.recorded, 'with recorded parameters'], [t.in_thesis, 'used in the thesis'],
+   [t.stale, 'code changed since']].forEach(([value, label]) => {
+    const d = el('div'); d.append(el('b', null, String(value)), el('span', null, label)); box.appendChild(d);
+  });
+}
+
+function renderStudies() {
+  const box = $('studies');
+  box.textContent = '';
+  INDEX.studies.slice().sort((a, b) => b.modified - a.modified).forEach(s => {
+    const b = el('button'); b.type = 'button'; b.dataset.study = s.study;
+    b.append(el('b', null, s.study));
+    const flags = [];
+    if (s.in_thesis) flags.push(`${s.in_thesis} in thesis`);
+    if (!s.scripts.length) flags.push('no writer');
+    if (s.spread_days > 2) flags.push(`${s.spread_days.toFixed(0)} d spread`);
+    b.append(el('small', null, `${s.files.length} files · ${kB(s.bytes)} · ${days(s.modified)} d ago`
+                               + (flags.length ? ` · ${flags.join(' · ')}` : '')));
+    b.addEventListener('click', () => { STUDY = s; CLEANUPVIEW = false; renderStudy(); });
+    box.appendChild(b);
+  });
+}
+
+let CLEANUPVIEW = false;
+
+function renderStudy() {
+  document.querySelectorAll('.studies button').forEach(b =>
+    b.setAttribute('aria-current', String(!CLEANUPVIEW && STUDY && b.dataset.study === STUDY.study)));
+  const view = $('view');
+  view.textContent = '';
+  if (CLEANUPVIEW) return renderCleanup(view);
+  if (!STUDY) return;
+
+  const head = el('div', 'runhead');
+  head.appendChild(el('h2', null, STUDY.study));
+  const bits = [];
+  bits.push(STUDY.scripts.length
+    ? `Written by ${STUDY.scripts.join(', ')} (inferred from the output directory).`
+    : 'No script in this repository writes to this directory any more — it is an orphan.');
+  bits.push(`${STUDY.n_figures} figures, ${STUDY.n_data} data files, ${kB(STUDY.bytes)}. Last written ${when(STUDY.modified)}.`);
+  const p = el('p', null, bits.join(' '));
+  head.appendChild(p);
+  if (STUDY.spread_days > 2) {
+    const w = el('p', 'warn', `These files were written up to ${STUDY.spread_days.toFixed(0)} days apart, `
+      + `so they are not one run: parameters may differ between the figures below.`);
+    head.appendChild(w);
+  }
+  if (STUDY.run_data) {
+    const rd = STUDY.run_data, det = el('details', 'params');
+    det.style.marginTop = '8px';
+    const n = Object.keys(rd.params).length;
+    det.appendChild(el('summary', null,
+      `Run parameters saved in ${rd.file.split('/').pop()} — ${n} values, covering `
+      + `${rd.covers.length} of ${STUDY.n_figures} figures here`));
+    const note = el('p', 'note', rd.covers.length === STUDY.n_figures
+      ? `Every figure in this directory was written within an hour of this run data, so these are its parameters.`
+      : `Only ${rd.covers.length ? rd.covers.join(', ') : 'no figure'} here was written within an hour of `
+        + `this run data (${when(rd.modified)}). The others came from different runs, and these values are not theirs.`);
+    det.appendChild(note);
+    const table = el('table'), tbody = el('tbody');
+    Object.entries(rd.params).sort().forEach(([k, v]) => {
+      const tr = el('tr'); tr.append(el('td', null, k), el('td', null, format(v))); tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); det.appendChild(table);
+    head.appendChild(det);
+  }
+  view.appendChild(head);
+
+  const figures = STUDY.files.filter(f => f.kind === 'figure').filter(pass);
+  const grid = el('div', 'grid2');
+  figures.forEach(f => grid.appendChild(figureCard(f)));
+  if (!figures.length) grid.appendChild(el('p', 'note', 'No figures match this filter.'));
+  view.appendChild(grid);
+
+  const data = STUDY.files.filter(f => f.kind === 'data').filter(pass);
+  if (data.length) {
+    const card = el('div', 'card'); card.style.marginTop = '14px';
+    card.appendChild(el('h2', null, 'Data files'));
+    card.appendChild(el('p', 'cap', 'Raw arrays saved beside the figures. These are what a replot reads.'));
+    const wrap = el('div', 'tablewrap'), table = el('table', 'data-list'), body = el('tbody');
+    data.forEach(f => {
+      const tr = el('tr');
+      tr.append(el('td', null, f.name), el('td', null, when(f.modified)), el('td', null, kB(f.bytes)));
+      body.appendChild(tr);
+    });
+    table.appendChild(body); wrap.appendChild(table); card.appendChild(wrap);
+    view.appendChild(card);
+  }
+}
+
+function pass(f) {
+  if (FILTER === 'thesis') return f.thesis.length > 0;
+  if (FILTER === 'stale') return f.stale.length > 0;
+  if (FILTER === 'unrecorded') return f.source !== 'recorded';
+  return true;
+}
+
+function figureCard(f) {
+  const card = el('div', 'fig');
+  const img = document.createElement('img');
+  img.loading = 'lazy'; img.src = '/figures/' + f.path.replace(/^images\//, '');
+  img.alt = f.name;
+  card.appendChild(img);
+  const body = el('div', 'body');
+  body.appendChild(el('h3', null, f.name));
+  body.appendChild(el('div', 'meta', `${kB(f.bytes)} · ${when(f.modified)}`));
+
+  const badges = el('div', 'badges');
+  f.thesis.forEach(t => badges.appendChild(el('span', 'badge thesis', `in thesis: ${t}`)));
+  badges.appendChild(el('span', 'badge ' + (f.source === 'recorded' ? 'rec' : 'inf'),
+                        f.source === 'recorded' ? 'parameters recorded' : 'parameters not recorded'));
+  if (!f.scripts.length) badges.appendChild(el('span', 'badge orphan', 'no writer'));
+  f.stale.forEach(() => badges.appendChild(el('span', 'badge stale', 'code changed since')));
+  body.appendChild(badges);
+
+  if (f.manifest) {
+    const m = f.manifest;
+    const det = el('details', 'params');
+    det.appendChild(el('summary', null, 'Recorded parameters'));
+    const rows = [['script', m.script], ['command', m.command], ['created', m.created],
+                  ['code fingerprint', m.code_fingerprint]];
+    Object.entries(m.params || {}).forEach(([k, v]) => rows.push(['param · ' + k, format(v)]));
+    Object.entries(m.constants || {}).forEach(([k, v]) => rows.push(['constant · ' + k, format(v)]));
+    if (m.laser) Object.entries(m.laser).forEach(([k, v]) => rows.push(['laser · ' + k, format(v)]));
+    Object.entries(m.versions || {}).forEach(([k, v]) => rows.push(['version · ' + k, format(v)]));
+    const table = el('table'), tbody = el('tbody');
+    rows.forEach(([k, v]) => { const tr = el('tr'); tr.append(el('td', null, k), el('td', null, String(v))); tbody.appendChild(tr); });
+    table.appendChild(tbody); det.appendChild(table);
+    body.appendChild(det);
+  } else {
+    body.appendChild(el('p', 'note', f.scripts.length
+      ? `No parameters were recorded when this was saved. Attributed to ${f.scripts.join(', ')} because that script writes to this directory — which says nothing about which run made this file.`
+      : 'No parameters were recorded, and no script in this repository writes here any more.'));
+  }
+  f.stale.forEach(s => body.appendChild(el('p', 'note', s)));
+  card.appendChild(body);
+  return card;
+}
+
+function format(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return Math.abs(v) < 1e-3 || Math.abs(v) >= 1e5 ? v.toExponential(3) : String(+v.toPrecision(6));
+  if (Array.isArray(v)) return v.map(format).join(', ');
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function renderCleanup(view) {
+  const head = el('div', 'runhead');
+  head.appendChild(el('h2', null, 'Cleanup candidates'));
+  head.appendChild(el('p', null, 'Files this repository no longer needs, with the reason each was flagged. '
+    + 'Archiving moves them under archive/ rather than deleting, because a run that took an hour to '
+    + 'produce should not disappear on a tidy-up.'));
+  view.appendChild(head);
+  const card = el('div', 'card');
+  const wrap = el('div', 'tablewrap'), table = el('table'), head2 = el('tr');
+  ['file', 'size', 'why'].forEach(h => head2.appendChild(el('th', null, h)));
+  const thead = el('thead'); thead.appendChild(head2); table.appendChild(thead);
+  const body = el('tbody');
+  if (!CLEANUP || !CLEANUP.length) {
+    card.appendChild(el('p', 'note', 'Nothing flagged: no duplicate figures, superseded _old data '
+      + 'files or editor metadata in images/. Earlier archives are listed in archive/*/ARCHIVE_INDEX.json.'));
+  }
+  (CLEANUP || []).forEach(c => {
+    const tr = el('tr');
+    tr.append(el('td', null, c.path), el('td', null, kB(c.bytes)), el('td', null, c.reason));
+    body.appendChild(tr);
+  });
+  table.appendChild(body); wrap.appendChild(table); card.appendChild(wrap);
+  view.appendChild(card);
+}
+
+$('filters').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  FILTER = b.dataset.filter;
+  document.querySelectorAll('#filters button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  renderStudy();
+});
+$('cleanupbtn').addEventListener('click', () => { CLEANUPVIEW = true; renderStudy(); });
+load();
+</script>
+</body>
+</html>

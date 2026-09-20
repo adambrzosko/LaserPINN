@@ -248,7 +248,7 @@ if __name__ == '__main__':
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     figpath = f'{out}/acceptance_bw_comparison.png'
-    fig.savefig(figpath, dpi=150, bbox_inches='tight')
+    save_fig(fig, figpath, dpi=150, bbox_inches='tight')
     print(f"\nFigure saved: {figpath}")
     plt.close(fig)
 
@@ -283,6 +283,6 @@ if __name__ == '__main__':
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     figpath2 = f'{out}/acceptance_bw_phase_distribution.png'
-    fig2.savefig(figpath2, dpi=150, bbox_inches='tight')
+    save_fig(fig2, figpath2, dpi=150, bbox_inches='tight')
     print(f"Figure saved: {figpath2}")
     plt.close(fig2)

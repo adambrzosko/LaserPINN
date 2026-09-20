@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source Explorer</title>
+<link rel="stylesheet" href="/static/theme.css">
+<style>
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; padding: 10px 12px;
+             border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); margin-bottom: 14px; }
+  /* sticky only where it costs a strip, not most of a phone screen */
+  @media (min-width: 880px) { .toolbar { position: sticky; top: 0; z-index: 3; } }
+  .toolbar .knob { flex: 0 1 118px; min-width: 96px; }
+  .toolbar .knob.wide { flex: 1 1 220px; }
+  .toolbar label { display: flex; justify-content: space-between; gap: 8px; }
+  .toolbar output { font-family: var(--mono); color: var(--ink); }
+  .toolbar .scope { flex: 1 0 100%; font-size: 11px; color: var(--muted); margin-top: -4px; }
+  input[type="range"] { padding: 0; border: 0; background: transparent; accent-color: var(--copper); height: 30px; }
+
+  .facts div { flex: 1 1 120px; }
+  .facts small { display: block; font-size: 10.5px; color: var(--muted); font-family: var(--mono); margin-top: 1px; }
+  .facts b { font-variant-numeric: tabular-nums; }
+
+  .verdict { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--rule); border-radius: 3px;
+             background: var(--surface); padding: 10px 12px; margin-bottom: 14px; font-size: 13px; }
+  .verdict p { margin: 0; max-width: 90ch; }
+  .pill { flex: none; font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 2px 8px;
+          border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+  .pill.muted { color: var(--muted); font-weight: 500; }
+
+  .jobs { display: grid; gap: 8px; }
+  .job { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); padding: 8px 10px; }
+  .job .top { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+  .job .name { font-size: 12px; }
+  .job .meta { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 3px; }
+  .job .bar { height: 4px; background: var(--rule); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .job .bar i { display: block; height: 100%; background: var(--copper); }
+  .job .acts { display: flex; gap: 6px; margin-top: 6px; }
+  .job .acts button { width: auto; padding: 3px 9px; font-size: 11.5px; }
+  .costerr { color: var(--bad); }
+  .card .cap b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 11px; }
+  button.ghost { margin-top: 0; }
+  .card.span { grid-column: 1 / -1; }
+  .facts div { flex-basis: 104px; }
+  .toolbar .knob.series { flex: 0 1 175px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Source Explorer</h1>
+  <nav class="tools" aria-label="Workbench tools">
+    <a href="/">Fibre workbench</a><a href="/pulses" aria-current="page">Source explorer</a><a href="/runs">Run browser</a>
+  </nav>
+  <span class="sub">gain-switched DFB pulse train · kernel <code>core/million_pulse_comparison.py</code> · metrics <code>gsdfb/analysis.py</code></span>
+  <span class="status busy" id="status">loading…</span>
+</header>
+
+<div class="layout">
+  <form class="panel" id="controls" novalidate>
+    <fieldset>
+      <legend>Start from</legend>
+      <div class="row one"><div><label for="preset">Preset</label><select id="preset"></select></div></div>
+      <div class="hint" id="presethint"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Laser</legend>
+      <div class="row one"><div><label for="laser">Device</label><select id="laser"></select></div></div>
+      <div class="hint" id="laserhint"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Drive</legend>
+      <div class="row">
+        <div><label for="frep">Repetition rate (GHz)</label><input id="frep" type="number" step="0.5" min="0.1" max="40" value="10"></div>
+        <div><label for="shape">Waveform</label><select id="shape"></select></div>
+      </div>
+      <div class="row">
+        <div><label for="idc">Bias I_DC (mA)</label><input id="idc" type="number" step="0.5" min="0" value="45.5"></div>
+        <div><label for="irf">RF amplitude I_RF (mA)</label><input id="irf" type="number" step="1" min="0" value="74"></div>
+      </div>
+      <div class="row" id="shapeparams">
+        <div data-param="duty"><label for="duty">On-time (% of period)</label><input id="duty" type="number" step="1" min="2" max="95" value="30"></div>
+        <div data-param="t_rise_ps"><label for="trise">Rise time (ps)</label><input id="trise" type="number" step="0.5" min="0" value="7.5"></div>
+        <div data-param="t_fall_ps"><label for="tfall">Fall time (ps)</label><input id="tfall" type="number" step="0.5" min="0" value="7.5"></div>
+        <div data-param="center_frac"><label for="centre">Centre (% of period)</label><input id="centre" type="number" step="1" min="0" max="100" value="15"></div>
+        <div data-param="sigma_ps"><label for="sigma">Width σ (ps)</label><input id="sigma" type="number" step="0.5" min="0.05" value="7.5"></div>
+        <div data-param="harmonics"><label for="a1">Harmonic 1: a₁</label><input id="a1" type="number" step="0.05" min="-0.5" max="0.5" value="0.25"></div>
+        <div data-param="harmonics"><label for="b1">b₁</label><input id="b1" type="number" step="0.05" min="-0.5" max="0.5" value="0"></div>
+        <div data-param="harmonics"><label for="a2">Harmonic 2: a₂</label><input id="a2" type="number" step="0.05" min="-0.5" max="0.5" value="0"></div>
+        <div data-param="harmonics"><label for="b2">b₂</label><input id="b2" type="number" step="0.05" min="-0.5" max="0.5" value="0"></div>
+      </div>
+      <div class="hint" id="drivehint"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Injection</legend>
+      <div class="row one"><div><label for="injmode">Source</label>
+        <select id="injmode">
+          <option value="none">none (free-running)</option>
+          <option value="sld" selected>SLD power → S_inj</option>
+          <option value="direct">S_inj directly</option>
+        </select></div></div>
+      <div class="row" data-inj="sld">
+        <div><label for="psld">SLD power (mW)</label><input id="psld" type="number" step="1" min="0" value="19"></div>
+        <div><label for="accbw">Acceptance BW (nm)</label><input id="accbw" type="number" step="0.5" min="0.01" value="8"></div>
+      </div>
+      <div class="row" data-inj="sld">
+        <div><label for="sldbw">SLD 3-dB BW (nm)</label><input id="sldbw" type="number" step="1" min="0.1" value="33"></div>
+        <div></div>
+      </div>
+      <div class="row one" data-inj="direct" hidden>
+        <div><label for="logs">log₁₀ S_inj (m⁻³)</label><input id="logs" type="number" step="0.25" min="10" max="25" value="19"></div>
+      </div>
+      <div class="hint" id="injhint"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Solver</legend>
+      <div class="row">
+        <div><label for="dt">Time step dt (ps)</label><input id="dt" type="number" step="0.1" min="0.05" max="5" value="0.5"></div>
+        <div><label for="npulses">Pulses</label>
+          <select id="npulses"><option>2000</option><option>5000</option><option selected>10000</option><option>20000</option><option>50000</option><option>100000</option></select></div>
+      </div>
+      <div class="row">
+        <div><label for="seed">Seed</label><input id="seed" type="number" step="1" min="0" value="42"></div>
+        <div><label for="discard">Settling pulses dropped</label><input id="discard" type="number" step="50" min="0" value="200"></div>
+      </div>
+      <div class="hint" id="costhint"></div>
+    </fieldset>
+
+    <button type="submit" id="run">Simulate</button>
+
+    <fieldset style="margin-top:14px">
+      <legend>High statistics</legend>
+      <div class="row">
+        <div><label for="hsn">Pulses</label>
+          <select id="hsn"><option value="100000">100,000</option><option value="500000">500,000</option><option value="1000000" selected>1,000,000</option><option value="2000000">2,000,000</option></select></div>
+        <div style="align-self:end"><button type="button" class="ghost" id="bg">Run in background</button></div>
+      </div>
+      <div class="hint" id="bghint"></div>
+      <div class="jobs" id="jobs"></div>
+    </fieldset>
+  </form>
+
+  <main>
+    <div class="toolbar" id="knobs">
+      <div class="knob wide"><label for="psi">AMZI phase ψ <output id="psiout" for="psi">0°</output></label>
+        <input id="psi" type="range" min="0" max="359" step="1" value="0"></div>
+      <div class="knob"><label for="bins">Histogram bins</label>
+        <select id="bins"><option>32</option><option>64</option><option selected>128</option><option>256</option><option>512</option></select></div>
+      <div class="knob"><label for="maxlag">Max lag</label><input id="maxlag" type="number" min="1" max="1000" step="10" value="100"></div>
+      <div class="knob"><label for="gate">Detector gate (ps)</label><input id="gate" type="number" min="0.5" step="1" value="30"></div>
+      <div class="knob"><label for="allanm">Allan max m</label><input id="allanm" type="number" min="4" step="100" value="1000"></div>
+      <div class="knob series"><label for="acfseries">Autocorrelate</label>
+        <select id="acfseries"><option value="eta" selected>η, splitting ratio</option><option value="I_A">I_A, port A</option></select></div>
+      <div class="knob wide"><label for="dataset">Dataset</label><select id="dataset"><option value="">—</option></select></div>
+      <div class="scope" id="scope">These re-analyse the loaded run without re-simulating it.</div>
+    </div>
+
+    <div id="error" class="err" hidden></div>
+    <div class="verdict" id="verdict" hidden><span class="pill" id="pill"></span><p id="verdicttext"></p></div>
+
+    <div class="facts">
+      <div><b id="f-r1">—</b><span>r₁</span><small id="f-r1b">99% random bound —</small></div>
+      <div><b id="f-sig">—</b><span>σ_Δφ (rad)</span><small id="f-sigu">uniform π/√3 = 1.814</small></div>
+      <div><b id="f-kl">—</b><span>KL (bits)</span><small id="f-klb">bias —</small></div>
+      <div><b id="f-ks">—</b><span>KS vs uniform</span><small id="f-ksc">99% critical —</small></div>
+      <div><b id="f-v">—</b><span>fringe visibility V</span><small id="f-vpsi">—</small></div>
+      <div><b id="f-jit">—</b><span>σ_t (ps)</span><small id="f-jitT">period —</small></div>
+      <div><b id="f-gate">—</b><span>in gate</span><small id="f-gatew">—</small></div>
+      <div><b id="f-p">—</b><span>peak power (mW)</span><small id="f-cv">CV —</small></div>
+      <div><b id="f-n">—</b><span>pulses</span><small id="f-time">—</small></div>
+    </div>
+
+    <div class="grid2" id="charts">
+      <div class="card">
+        <h2>Drive current</h2>
+        <p class="cap" id="cap-drive">One period of I(t), with the threshold and where the pulse peaks land.</p>
+        <canvas id="cv-drive"></canvas>
+        <div class="legend" id="lg-drive"></div>
+        <details class="data" data-for="cv-drive"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>Inter-pulse phase difference Δφ</h2>
+        <p class="cap" id="cap-dphi">Wrapped phase difference between consecutive pulse peaks.</p>
+        <canvas id="cv-dphi"></canvas>
+        <div class="legend" id="lg-dphi"></div>
+        <details class="data" data-for="cv-dphi"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>AMZI splitting ratio η at ψ</h2>
+        <p class="cap" id="cap-eta">η = I_A / (I_A + I_B) for consecutive pulse pairs.</p>
+        <canvas id="cv-eta"></canvas>
+        <div class="legend" id="lg-eta"></div>
+        <details class="data" data-for="cv-eta"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>AMZI fringe</h2>
+        <p class="cap" id="cap-fringe">Mean port-A power as the delayed-arm phase ψ is swept.</p>
+        <canvas id="cv-fringe"></canvas>
+        <details class="data" data-for="cv-fringe"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2 id="h-acf">Intensity autocorrelation ρ(k)</h2>
+        <p class="cap" id="cap-acf">Pearson coefficient at lag k, as defined in Chapter 5.</p>
+        <canvas id="cv-acf"></canvas>
+        <div class="legend" id="lg-acf"></div>
+        <details class="data" data-for="cv-acf"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>Phase correlation |g₁(k)|</h2>
+        <p class="cap" id="cap-g1">|⟨exp i(φₙ₊ₖ − φₙ)⟩|; lag 1 is r₁.</p>
+        <canvas id="cv-g1"></canvas>
+        <div class="legend" id="lg-g1"></div>
+        <details class="data" data-for="cv-g1"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>Peak arrival within the period</h2>
+        <p class="cap" id="cap-timing">Where each pulse peaks, on bins aligned to dt.</p>
+        <canvas id="cv-timing"></canvas>
+        <div class="legend" id="lg-timing"></div>
+        <details class="data" data-for="cv-timing"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>Allan deviation of the period</h2>
+        <p class="cap" id="cap-allan">Overlapping Allan deviation of the fractional period.</p>
+        <canvas id="cv-allan"></canvas>
+        <div class="legend" id="lg-allan"></div>
+        <details class="data" data-for="cv-allan"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card">
+        <h2>Peak power</h2>
+        <p class="cap" id="cap-power">Front-facet power at each pulse peak.</p>
+        <canvas id="cv-power"></canvas>
+        <details class="data" data-for="cv-power"><summary>Show data</summary></details>
+      </div>
+
+      <div class="card span">
+        <h2>Peak phase, pulse by pulse</h2>
+        <p class="cap" id="cap-trace">Wrapped phase at each peak for the first pulses of the run.</p>
+        <canvas id="cv-trace"></canvas>
+        <details class="data" data-for="cv-trace"><summary>Show data</summary></details>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="/static/plot.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let META = null, LAST = null, CURRENT = null, WATCH = null;
+/* Every path that renders (simulate, openDataset, reanalyse) takes a token first. A response
+   whose token is stale is dropped: without this, picking a 10k run while a 1M analysis is in
+   flight left the charts showing the 1M run under the 10k label. */
+let REQ = 0, LAST_KNOBS = null, EXACT = {}, FORM_DIRTY = false;
+const claim = () => ++REQ;
+const fresh = tok => tok === REQ;
+
+/* ---------------- requests ---------------- */
+async function api(url, body) {
+  const r = await fetch(url, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error(`${url}: the server returned ${r.status} without JSON`); }
+  if (!r.ok) { const err = new Error(j.error || 'request failed'); err.status = r.status; err.payload = j; throw err; }
+  return j;
+}
+function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status ' + (cls || ''); }
+function showError(msg) { const e = $('error'); e.hidden = !msg; e.textContent = msg || ''; }
+const secs = s => s < 1 ? `${Math.round(s * 1000)} ms` : s < 90 ? `${s.toFixed(s < 10 ? 1 : 0)} s` : `${(s / 60).toFixed(1)} min`;
+const n0 = v => Number(v).toLocaleString('en-GB');
+const f = (v, d) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
+const sci = v => (v === null || v === undefined) ? '—' : Number(v).toExponential(2).replace('e+', 'e');
+
+/* ---------------- form <-> specification ---------------- */
+function shapeParams(key) { return META ? (META.shapes.find(s => s.key === key) || { params: [] }).params : []; }
+
+/* Inputs show rounded numbers, but a spec's exact value is kept: PAPER_I_RF is
+   74.00000000000001 mA, and submitting the rounded 74 would be a different run id, so an
+   already-simulated preset would silently re-simulate. */
+function exactly(field, shown) {
+  const kept = EXACT[field];
+  return (kept !== undefined && +Number(kept).toPrecision(10) === shown) ? kept : shown;
+}
+
+function specFromForm(nPulses) {
+  const shape = $('shape').value, need = shapeParams(shape), sp = {};
+  if (need.includes('duty')) sp.duty = +$('duty').value / 100;
+  if (need.includes('t_rise_ps')) sp.t_rise_ps = +$('trise').value;
+  if (need.includes('t_fall_ps')) sp.t_fall_ps = +$('tfall').value;
+  if (need.includes('center_frac')) sp.center_frac = +$('centre').value / 100;
+  if (need.includes('sigma_ps')) sp.sigma_ps = +$('sigma').value;
+  if (need.includes('harmonics')) sp.harmonics = [[+$('a1').value, +$('b1').value], [+$('a2').value, +$('b2').value]];
+  const mode = $('injmode').value;
+  const injection = mode === 'none' ? { mode } : mode === 'sld'
+    ? { mode, P_sld_mW: +$('psld').value, acceptance_bw_nm: +$('accbw').value, sld_bw_nm: +$('sldbw').value }
+    : { mode, log10_S_inj: +$('logs').value };
+  return {
+    laser: $('laser').value, f_rep_GHz: exactly('f_rep_GHz', +$('frep').value),
+    I_DC_mA: exactly('I_DC_mA', +$('idc').value), I_RF_mA: exactly('I_RF_mA', +$('irf').value),
+    shape, shape_params: sp, injection, dt_ps: +$('dt').value,
+    n_pulses: nPulses || +$('npulses').value, n_discard: +$('discard').value, seed: +$('seed').value,
+  };
+}
+
+function formFromSpec(s) {
+  const r = v => +Number(v).toPrecision(10);
+  EXACT = { f_rep_GHz: s.f_rep_GHz, I_DC_mA: s.I_DC_mA, I_RF_mA: s.I_RF_mA };
+  $('laser').value = s.laser; $('frep').value = r(s.f_rep_GHz); $('idc').value = r(s.I_DC_mA); $('irf').value = r(s.I_RF_mA);
+  $('shape').value = s.shape; $('dt').value = s.dt_ps; $('discard').value = s.n_discard; $('seed').value = s.seed;
+  const p = s.shape_params || {};
+  if (p.duty !== undefined) $('duty').value = +(p.duty * 100).toFixed(3);
+  if (p.t_rise_ps !== undefined) $('trise').value = p.t_rise_ps;
+  if (p.t_fall_ps !== undefined) $('tfall').value = p.t_fall_ps;
+  if (p.center_frac !== undefined) $('centre').value = +(p.center_frac * 100).toFixed(3);
+  if (p.sigma_ps !== undefined) $('sigma').value = p.sigma_ps;
+  if (p.harmonics) {
+    const h = p.harmonics.concat([[0, 0], [0, 0]]);
+    $('a1').value = h[0][0]; $('b1').value = h[0][1]; $('a2').value = h[1][0]; $('b2').value = h[1][1];
+  }
+  const inj = s.injection; $('injmode').value = inj.mode;
+  if (inj.mode === 'sld') { $('psld').value = inj.P_sld_mW; $('accbw').value = inj.acceptance_bw_nm; $('sldbw').value = inj.sld_bw_nm; }
+  if (inj.mode === 'direct') $('logs').value = inj.log10_S_inj;
+  const live = [...$('npulses').options].map(o => +o.value);
+  if (live.includes(s.n_pulses)) $('npulses').value = s.n_pulses;
+  else {
+    if (![...$('hsn').options].some(o => +o.value === s.n_pulses))
+      $('hsn').add(new Option(n0(s.n_pulses), s.n_pulses));
+    $('hsn').value = s.n_pulses;
+  }
+  syncVisibility();
+}
+
+function syncVisibility() {
+  const need = shapeParams($('shape').value);
+  document.querySelectorAll('#shapeparams [data-param]').forEach(el => { el.hidden = !need.includes(el.dataset.param); });
+  $('shapeparams').hidden = !need.length;
+  const mode = $('injmode').value;
+  document.querySelectorAll('[data-inj]').forEach(el => { el.hidden = el.dataset.inj !== mode; });
+}
+
+/* ---------------- live estimate as the form changes ---------------- */
+let estTimer = null, estSeq = 0;
+function scheduleEstimate() { clearTimeout(estTimer); estTimer = setTimeout(refreshEstimate, 200); }
+
+async function refreshEstimate() {
+  const seq = ++estSeq;
+  let e;
+  try { e = await api('/api/pulses/estimate', { spec: specFromForm() }); }
+  catch (err) {
+    if (seq !== estSeq) return;
+    $('costhint').textContent = err.message; $('costhint').className = 'hint costerr';
+    $('run').disabled = true; $('bg').disabled = true;
+    return;
+  }
+  if (seq !== estSeq) return;
+  $('run').disabled = false; $('bg').disabled = false;
+  const d = e.drive, las = e.laser;
+  $('laserhint').textContent = `I_th = ${f(las.I_th_mA, 2)} mA · τ_p = ${f(las.tau_p_ps, 2)} ps · α_H = ${las.alpha_H} · β_sp = ${sci(las.beta_sp)}`;
+  $('drivehint').textContent = `I(t) spans ${f(d.I_min_mA, 1)}–${f(d.I_max_mA, 1)} mA = ${f(d.I_min_mA / d.I_th_mA, 2)}–${f(d.I_max_mA / d.I_th_mA, 1)} × I_th; `
+    + `above threshold for ${f(100 * d.above_threshold_frac, 0)}% of the ${f(d.T_rep_ps, 0)} ps period. `
+    + `I_RF = ${f(d.V_rf_amplitude_V, 2)} V amplitude, ${f(2 * d.V_rf_amplitude_V, 2)} V peak-to-peak into 50 Ω. Chapter 5's experimental text and its V_RF row call 3.7 V peak-to-peak; the same table's I_RF row, and the simulation, use 3.7 V / 50 Ω = 74 mA as an amplitude.`
+    + (e.spec.shape === 'sine' ? ''
+       : e.spec.shape === 'fourier' ? ' The Fourier envelope starts at 0.5 and is clipped to [0, 1], so it reaches I_DC + I_RF only if the harmonics sum to 0.5 — with a₁ = 0.25 it peaks a quarter of the swing short.'
+       : ' Pulse shapes run from max(I_DC − I_RF, 0) to I_DC + I_RF, so shapes compare at equal swing.');
+  const inj = e.spec.injection;
+  $('injhint').textContent = inj.mode === 'none' ? 'No injected field: phase randomisation comes only from spontaneous emission.'
+    : `S_inj = ${sci(e.S_inj)} m⁻³` + (inj.mode === 'sld'
+      ? ` (${f(inj.acceptance_bw_nm, 1)} of ${f(inj.sld_bw_nm, 0)} nm accepted, 3 dB coupling loss). The study default is 8 nm; Chapter 5's text uses 3 nm.` : '.');
+  $('dt').max = e.max_dt_ps.toFixed(2);
+  $('costhint').className = 'hint';
+  $('costhint').textContent = e.cached
+    ? `Already simulated: loads instantly. ${e.steps_per_period} steps per period.`
+    : `≈ ${secs(e.predicted_s)} · ${e.steps_per_period} steps per period · ${e.calibrated ? 'cost measured on this machine' : 'estimate until the kernel has warmed up'}`
+      + (e.live_ok ? '' : ` — over the ${e.live_max_s} s live limit; use high statistics.`)
+      + ` · dt must stay under ${f(e.max_dt_ps, 2)} ps for this laser (τ_p = ${f(e.laser.tau_p_ps, 2)} ps): the field integrator diverges near the photon lifetime.`;
+  $('run').disabled = !e.live_ok && !e.cached;
+  const hs = +$('hsn').value, spec = e.spec;
+  const hsSeconds = e.predicted_s * (hs + spec.n_discard) / (spec.n_pulses + spec.n_discard);
+  $('bghint').textContent = `≈ ${secs(hsSeconds)} in a separate worker process. The page stays usable, and the run is saved to disk. `
+    + `A source with no correlation at all resolves r₁ < ${META.threshold} at 99% from ${n0(e.resolve_pulses)} pulses; a measured r₁ near the threshold needs more.`;
+}
+
+/* ---------------- simulate, analyse ---------------- */
+function knobs() {
+  return { psi_deg: +$('psi').value, n_bins: +$('bins').value, max_lag: +$('maxlag').value,
+           gate_ps: +$('gate').value, allan_max_m: +$('allanm').value, acf_series: $('acfseries').value };
+}
+
+async function simulate(ev) {
+  ev && ev.preventDefault();
+  showError(''); $('run').disabled = true;
+  setStatus('simulating…', 'busy');
+  const tok = claim(), sent = JSON.stringify(knobs());
+  try {
+    const j = await api('/api/pulses/simulate', { spec: specFromForm(), knobs: knobs() });
+    if (!fresh(tok)) return;
+    const a = j.analysis;
+    CURRENT = a.dataset.id;
+    render(a);
+    // knobs moved while the kernel ran: the response was built with the old ones
+    if (JSON.stringify(knobs()) !== sent) knobChanged();
+    setStatus(j.reused ? `reused the saved run · analysed in ${f(a.timings.analysis_ms, 0)} ms`
+                       : `simulated ${n0(a.dataset.n)} pulses in ${secs(a.dataset.runtime_s)} · analysed in ${f(a.timings.analysis_ms, 0)} ms`);
+    refreshDatasets(); scheduleEstimate();
+  } catch (err) {
+    showError(err.status === 409 ? `${err.message}.` : err.message);
+    setStatus('error', 'err');
+  } finally { $('run').disabled = false; }
+}
+
+let busy = false, again = false;
+function knobChanged() {
+  $('psiout').textContent = `${$('psi').value}°`;
+  if (!CURRENT) return;
+  // selects fire input and change together, and a number input fires change after its last
+  // input: without this every such edit sent two identical requests
+  if (JSON.stringify(knobs()) === LAST_KNOBS) return;
+  $('charts').classList.add('stale');
+  if (busy) { again = true; return; }
+  reanalyse();
+}
+async function reanalyse() {
+  busy = true;
+  do {
+    again = false;
+    const tok = claim();
+    LAST_KNOBS = JSON.stringify(knobs());
+    try {
+      const a = await api('/api/pulses/analyse', { dataset_id: CURRENT, knobs: knobs() });
+      if (!fresh(tok)) break;
+      if (!again) {
+        showError(''); render(a);
+        setStatus(`re-analysed in ${f(a.timings.analysis_ms, 0)} ms, no re-simulation`);
+      }
+    } catch (err) {
+      LAST_KNOBS = null;                       // a failed request must not block the retry
+      if (fresh(tok)) { showError(err.message); setStatus('error', 'err'); }
+    }
+  } while (again);
+  busy = false;
+  $('charts').classList.remove('stale');
+}
+
+async function openDataset(id, fill) {
+  if (!id) return;
+  const tok = claim();
+  CURRENT = id; showError('');
+  setStatus('loading run…', 'busy');
+  $('charts').classList.add('stale');
+  try {
+    const a = await api('/api/pulses/analyse', { dataset_id: id, knobs: knobs() });
+    if (!fresh(tok)) return;
+    if (fill) {
+      formFromSpec(a.dataset.spec);
+      FORM_DIRTY = false;                      // the form now matches what is on screen
+      $('preset').value = '__custom';
+      setText('presethint', 'Loaded from the selected run.');
+    }
+    LAST_KNOBS = JSON.stringify(knobs());
+    render(a);
+    setStatus(`opened ${n0(a.dataset.n)} pulses · analysed in ${f(a.timings.analysis_ms, 0)} ms`);
+    scheduleEstimate();
+  } catch (err) { if (fresh(tok)) { showError(err.message); setStatus('error', 'err'); } }
+  finally { if (fresh(tok)) $('charts').classList.remove('stale'); }
+}
+
+async function refreshDatasets() {
+  const { datasets } = await api('/api/pulses/datasets');
+  const sel = $('dataset');
+  sel.textContent = '';
+  if (!datasets.length) sel.add(new Option('—', ''));
+  datasets.forEach(d => sel.add(new Option(`${d.label}${d.source === 'saved' ? ' · saved' : ''}`, d.id)));
+  if (CURRENT) sel.value = CURRENT;
+}
+
+/* ---------------- background jobs ---------------- */
+let jobTimer = null;
+async function submitJob() {
+  showError('');
+  try {
+    const { job } = await api('/api/pulses/jobs', { spec: specFromForm(+$('hsn').value) });
+    FORM_DIRTY = false;
+    if (job.state === 'done') {            // already simulated: open it once, do not also watch it
+      WATCH = null;
+      await refreshDatasets();
+      openDataset(job.dataset_id, false);
+    } else {
+      WATCH = job.id;
+    }
+    pollJobs();
+  } catch (err) { showError(err.message); }
+}
+
+async function pollJobs() {
+  clearTimeout(jobTimer);
+  let jobs;
+  try { ({ jobs } = await api('/api/pulses/jobs')); } catch (err) { jobTimer = setTimeout(pollJobs, 2000); return; }
+  renderJobs(jobs);
+  const watched = jobs.find(j => j.id === WATCH);
+  if (watched && watched.state === 'done') {
+    WATCH = null;
+    await refreshDatasets();
+    // filling the form would discard anything set up while the job ran
+    setStatus(`background run finished: ${n0(watched.n_pulses)} pulses in ${secs(watched.runtime_s || 0)}`
+              + (FORM_DIRTY ? ' — opened without changing your edited form' : ''));
+    openDataset(watched.dataset_id, !FORM_DIRTY);
+  }
+  if (watched && (watched.state === 'failed' || watched.state === 'cancelled')) WATCH = null;
+  if (jobs.some(j => !['done', 'failed', 'cancelled'].includes(j.state))) jobTimer = setTimeout(pollJobs, 1000);
+}
+
+function renderJobs(jobs) {
+  const box = $('jobs');
+  box.textContent = '';
+  const active = j => !['done', 'failed', 'cancelled'].includes(j.state);
+  // active jobs first: a running job must keep its Cancel button however many are queued behind it
+  jobs.slice().sort((a, b) => (active(b) ? 1 : 0) - (active(a) ? 1 : 0)).slice(0, 6).forEach(j => {
+    const el = document.createElement('div'); el.className = 'job';
+    const top = document.createElement('div'); top.className = 'top';
+    const name = document.createElement('span'); name.className = 'name'; name.textContent = j.label;
+    const pill = document.createElement('span');
+    const word = { queued: 'queued', starting: 'starting worker', running: 'running', done: '✓ done', failed: '✕ failed', cancelled: 'cancelled' }[j.state];
+    pill.className = 'pill ' + ({ done: 'good', failed: 'bad', cancelled: 'muted' }[j.state] || 'warn');
+    pill.textContent = word;
+    top.append(name, pill); el.appendChild(top);
+    const meta = document.createElement('div'); meta.className = 'meta';
+    if (j.state === 'running') meta.textContent = `${secs(j.elapsed_s)} elapsed · about ${secs(j.eta_s)} left (estimated from the measured step cost)`;
+    else if (j.state === 'starting') meta.textContent = j.worker === 'ready' ? 'handing to the worker' : 'starting the worker: import and compile, ~3 s';
+    else if (j.state === 'queued') meta.textContent = `waits for the running job · ≈ ${secs(j.predicted_s)}`;
+    else if (j.state === 'done') meta.textContent = j.note || `${secs(j.runtime_s || 0)} · saved`;
+    else if (j.state === 'failed') meta.textContent = j.error;
+    else meta.textContent = 'stopped; nothing was saved';
+    el.appendChild(meta);
+    if (['running', 'starting'].includes(j.state)) {
+      const bar = document.createElement('div'); bar.className = 'bar';
+      const fill = document.createElement('i'); fill.style.width = `${(100 * (j.progress || 0)).toFixed(1)}%`;
+      bar.appendChild(fill); el.appendChild(bar);
+    }
+    const acts = document.createElement('div'); acts.className = 'acts';
+    if (!['done', 'failed', 'cancelled'].includes(j.state)) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = 'Cancel';
+      b.addEventListener('click', async () => { await api('/api/pulses/jobs/cancel', { id: j.id }); pollJobs(); });
+      acts.appendChild(b);
+    }
+    if (j.state === 'done') {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = 'Open';
+      b.addEventListener('click', () => openDataset(j.dataset_id, true));
+      acts.appendChild(b);
+    }
+    if (acts.children.length) el.appendChild(acts);
+    box.appendChild(el);
+  });
+}
+
+/* ---------------- render ---------------- */
+function setText(id, text) { $(id).textContent = text; }
+
+function render(a) {
+  LAST = a;
+  const p = a.phase, m = a.amzi, t = a.timing, w = a.power, d = a.drive, ds = a.dataset;
+  const H = 300;
+  $('dataset').value = ds.id;
+  if ($('dataset').value !== ds.id) refreshDatasets();
+
+  // headline numbers
+  setText('f-r1', f(p.r1, 4)); setText('f-r1b', `99% random bound ${f(p.r1_bound99, 4)}`);
+  setText('f-sig', f(p.sigma_phi, 3));
+  setText('f-kl', f(p.kl, 4)); setText('f-klb', `bias ≈ ${f(p.kl_bias, 4)} at ${a.knobs.n_bins} bins`);
+  setText('f-ks', f(p.ks, 4)); setText('f-ksc', `99% critical ${f(p.ks_crit99, 4)}`);
+  setText('f-v', f(m.V, 4)); setText('f-vpsi', `max at ψ = ${f(m.psi_opt_deg, 0)}°`);
+  setText('f-jit', f(t.sigma_t_ps, 2)); setText('f-jitT', `period ${f(t.sigma_T_ps, 2)} ps`);
+  setText('f-gate', `${f(100 * t.in_gate, 1)}%`); setText('f-gatew', `±${f(t.gate_ps / 2, 1)} ps of median`);
+  setText('f-p', f(w.mean_mW, 1)); setText('f-cv', `CV ${f(w.cv, 3)}`);
+  setText('f-n', n0(ds.n)); setText('f-time', `${ds.source} · ${secs(ds.runtime_s)} · ${f(a.timings.analysis_ms, 0)} ms`);
+
+  // verdict: always an icon, a word and a sentence, never colour alone
+  const thr = p.threshold, v = $('verdict'), pill = $('pill');
+  v.hidden = false;
+  const half = p.r1_band99 ?? p.r1_bound99;
+  const band = `${f(Math.max(0, p.r1 - half), 4)} to ${f(p.r1 + half, 4)}`;
+  if (p.verdict === 'below') {
+    pill.className = 'pill good'; pill.textContent = '✓ randomised';
+    setText('verdicttext', `r₁ = ${f(p.r1, 4)}, and at ${n0(ds.n)} pulses the 99% band on the true value (${band}) lies entirely below ${thr}.`
+      + (p.significant ? ` The correlation is still distinguishable from zero (the 99% bound for a perfectly random source is ${f(p.r1_bound99, 4)}).` : ''));
+  } else if (p.verdict === 'above') {
+    pill.className = 'pill bad'; pill.textContent = '✕ correlated';
+    setText('verdicttext', `r₁ = ${f(p.r1, 4)}, and the 99% band on the true value (${band}) lies entirely above ${thr}: this source fails the requirement.`);
+  } else {
+    pill.className = 'pill warn'; pill.textContent = '? unresolved';
+    setText('verdicttext', `r₁ = ${f(p.r1, 4)}, but the 99% band on the true value (${band}) straddles ${thr}, so ${n0(ds.n)} pulses cannot decide it. `
+      + (p.resolve_pulses
+          ? `Deciding it either way at this r₁ takes ≥ ${n0(p.resolve_pulses)} pulses`
+          : `Nothing decides it while r₁ sits exactly on the threshold`)
+      + ` (a source with no correlation at all resolves from ${n0(p.resolve_pulses_ideal)}). A perfectly random source reads above ${thr} with probability ${f(100 * p.p_random_exceeds, 0)}% at this N.`);
+  }
+
+  // drive
+  const halfT = t.sigma_t_ps;
+  plot($('cv-drive'), [{ x: d.t_ps, y: d.I_mA, label: 'I(t)', color: '--s1', width: 2 }], {
+    height: H, xlabel: 'time within period (ps)', ylabel: 'current (mA)', yMin0: true,
+    hlines: [{ y: d.I_th_mA, label: 'I_th', color: '--muted' }],
+    bands: [{ x0: t.mean_ps - halfT, x1: t.mean_ps + halfT, color: '--s2' }],
+    vlines: [{ x: t.mean_ps, color: '--s2', label: 'mean peak' }],
+  });
+  legend($('lg-drive'), [{ label: 'I(t)', color: '--s1' }, { label: 'threshold', color: '--muted', kind: 'dash' },
+                         { label: 'peak arrival, mean ± σ_t', color: '--s2', kind: 'band' }]);
+  setText('cap-drive', `${f(d.I_min_mA, 1)}–${f(d.I_max_mA, 1)} mA against I_th = ${f(d.I_th_mA, 2)} mA; above threshold for ${f(100 * d.above_threshold_frac, 0)}% of the period. Pulses peak at ${f(t.mean_ps, 1)} ± ${f(t.sigma_t_ps, 2)} ps.`);
+
+  // phase difference
+  plot($('cv-dphi'), [{ x: p.hist.x, y: p.hist.density, label: 'Δφ density', kind: 'bars', color: '--s1', binWidth: p.hist.bin }], {
+    height: H, xlabel: 'Δφ (rad)', ylabel: 'probability density', xRange: [-Math.PI, Math.PI],
+    hlines: [{ y: p.hist.uniform, label: 'uniform 1/2π', color: '--muted' }],
+  });
+  legend($('lg-dphi'), [{ label: 'simulated', color: '--s1', kind: 'bars' }, { label: 'uniform, 1/2π', color: '--muted', kind: 'dash' }]);
+  setText('cap-dphi', `σ_Δφ = ${f(p.sigma_phi, 3)} rad (uniform: ${f(p.sigma_phi_uniform, 3)}). KL = ${f(p.kl, 4)} bits, of which ≈ ${f(p.kl_bias, 4)} is the finite-sample bias of ${a.knobs.n_bins} bins. KS = ${f(p.ks, 4)} on the first ${n0(p.ks_n)} differences (99% critical ${f(p.ks_crit99, 4)}).`);
+
+  // splitting ratio: against the ideal arcsine, and against uniform phase with these peak powers
+  const eh = m.eta_hist, arc = m.arcsine;
+  plot($('cv-eta'), [{ x: eh.x, y: eh.density, label: 'η density', kind: 'bars', color: '--s1', binWidth: eh.bin },
+                     { x: eh.x, y: eh.ideal, label: 'ideal arcsine [0, 1]', color: '--muted', dash: [5, 4], width: 1.4 },
+                     { x: eh.x, y: eh.expected, label: 'uniform phase, these peak powers', color: '--s2', width: 2 }],
+       { height: H, xlabel: `η at ψ = ${m.psi_deg}°`, ylabel: 'probability density', xRange: [0, 1] });
+  legend($('lg-eta'), [{ label: 'simulated', color: '--s1', kind: 'bars' },
+                       { label: 'ideal arcsine', color: '--muted', kind: 'dash' },
+                       { label: 'uniform phase, these peak powers', color: '--s2' }]);
+  const phaseOk = arc.ks_uniform_phase <= arc.ks_crit99;
+  setText('cap-eta', `KS ${f(arc.ks_uniform_phase, 4)} to the uniform-phase expectation and ${f(arc.ks_ideal, 4)} to the ideal arcsine `
+    + `(99% critical ${f(arc.ks_crit99, 4)} for ${n0(arc.ks_n)} samples). `
+    + (phaseOk ? 'Consistent with uniform phase: any departure from the ideal is peak-power imbalance. '
+               : 'Departs from uniform phase at 99% confidence, beyond what the peak powers explain; at large N even a small residual correlation (see r₁) is detectable. ')
+    + `Contrast √(8 var η) = ${f(arc.contrast, 3)}; uniform phase would give √⟨v²⟩ = ${f(arc.contrast_amplitude, 3)}.`);
+
+  // fringe
+  plot($('cv-fringe'), [{ x: m.fringe.psi_deg, y: m.fringe.IA_mean_mW, label: '⟨I_A⟩', color: '--s1', width: 2, dots: true }], {
+    height: H, xlabel: 'ψ (degrees)', ylabel: 'mean port-A power (mW)', xRange: [0, 360],
+    vlines: [{ x: m.psi_deg, color: '--s2', label: `ψ = ${m.psi_deg}°` }],
+  });
+  setText('cap-fringe', `Visibility V = ${f(m.V, 4)}, maximum at ψ = ${f(m.psi_opt_deg, 0)}° (64-point sweep). For equal-energy pulses V ≈ r₁ = ${f(p.r1, 4)}; a flat fringe is what randomisation looks like.`);
+
+  // intensity autocorrelation
+  const ac = m.acf;
+  setText('h-acf', `Intensity autocorrelation ρ(k) of ${ac.series === 'eta' ? 'η' : 'I_A'}`);
+  // fall back to the flat white-noise bound if the payload predates the empirical envelope:
+  // without this, render() threw here after the headline numbers had already been replaced
+  const envUp = ac.envelope || ac.lags.map(() => ac.bound), envDown = envUp.map(v => -v);
+  plot($('cv-acf'), [{ x: ac.lags, y: ac.rho, label: 'ρ(k)', color: '--s1', kind: 'dots', r: ac.lags.length > 300 ? 1.4 : 2.4 },
+                     { x: ac.lags, y: envUp, label: 'phases redrawn, 99% envelope', color: '--s3', dash: [5, 4], width: 1.3 },
+                     { x: ac.lags, y: envDown, label: '', color: '--s3', dash: [5, 4], width: 1.3 }], {
+    height: H, xlabel: 'lag k (pulses)', ylabel: 'ρ(k)',
+    hlines: [{ y: 0, color: '--rule', dash: [] }],
+    yRange: (() => { const lim = Math.max(...envUp, ...ac.rho.map(v => Math.abs(v || 0))) * 1.15; return [-lim, lim]; })(),
+  });
+  legend($('lg-acf'), [{ label: 'ρ(k), lag 0 omitted', color: '--s1' },
+                       { label: 'envelope with these pulse energies and random phases', color: '--s3', kind: 'dash' }]);
+  setText('cap-acf', `${ac.outside} of ${ac.lags.length} lags outside the envelope (about ${f(ac.expected_outside, 1)} expected by chance). The envelope comes from 12 surrogates `
+    + `with the phases redrawn and these peak powers kept (per-lag mean plus 2.576 pooled sd), because both series are built from consecutive pulse pairs: `
+    + `I_A carries a two-term average of the pulse energies, so a white-noise bound (±${f(ac.bound, 4)}) calls a perfectly random source correlated `
+    + `(${ac.outside_bartlett} lags would be flagged against it here). `
+    + (ac.series === 'eta' ? 'η divides the energies out; I_A keeps them, like the oscilloscope record.' : 'I_A keeps the energies, as the oscilloscope records them; η divides them out.'));
+
+  // phase correlation
+  plot($('cv-g1'), [{ x: p.g1.lags, y: p.g1.value, label: '|g₁(k)|', color: '--s1', kind: 'dots', r: p.g1.lags.length > 300 ? 1.4 : 2.4 },
+                    { x: p.g1.lags, y: p.g1.bound, label: '99% bound, random source', color: '--muted', dash: [5, 4], width: 1.3 }], {
+    height: H, xlabel: 'lag k (pulses)', ylabel: '|g₁(k)|', ylog: true,
+  });
+  legend($('lg-g1'), [{ label: '|g₁(k)|', color: '--s1' }, { label: '99% bound for a random source', color: '--muted', kind: 'dash' }]);
+  setText('cap-g1', `Lag 1 is r₁ = ${f(p.r1, 4)}. ${p.g1.outside} of ${p.g1.lags.length} lags sit above the bound √(−ln 0.01 / (N − k)). Log scale: a random train lies flat near ${f(p.r1_mean_random, 4)}.`);
+
+  // timing
+  const gateLo = t.median_ps - t.gate_ps / 2, gateHi = t.median_ps + t.gate_ps / 2;
+  plot($('cv-timing'), [{ x: t.hist.x, y: t.hist.counts, label: 'pulses', kind: 'bars', color: '--s1', binWidth: t.hist.bin_ps }], {
+    height: H, xlabel: 'peak time within period (ps)', ylabel: 'pulses per bin',
+    bands: [{ x0: gateLo, x1: gateHi, color: '--s2' }],
+  });
+  legend($('lg-timing'), [{ label: `bins of ${f(t.hist.bin_ps, 2)} ps`, color: '--s1', kind: 'bars' }, { label: `${f(t.gate_ps, 1)} ps gate`, color: '--s2', kind: 'band' }]);
+  setText('cap-timing', `σ_t = ${f(t.sigma_t_ps, 2)} ps (quantisation floor dt/√12 = ${f(t.quant_floor_ps, 3)} ps), period jitter ${f(t.sigma_T_ps, 2)} ps. ${f(100 * t.in_gate, 2)}% of peaks land inside a ${f(t.gate_ps, 1)} ps gate centred on the median arrival.`);
+
+  // Allan
+  plot($('cv-allan'), [{ x: t.allan.tau_s, y: t.allan.adev, label: 'σ_y(τ)', color: '--s1', width: 2, dots: true },
+                       { x: t.allan.tau_s, y: t.allan.white_pm, label: 'independent arrival times, √3 σ_t/τ', color: '--muted', dash: [5, 4], width: 1.3 }], {
+    height: H, xlabel: 'τ (s)', ylabel: 'σ_y(τ)', xlog: true, ylog: true,
+  });
+  legend($('lg-allan'), [{ label: 'σ_y(τ)', color: '--s1' }, { label: 'independent arrival times, √3 σ_t / τ', color: '--muted', kind: 'dash' }]);
+  const ratio = (i) => t.allan.white_pm[i] > 0 ? t.allan.adev[i] / t.allan.white_pm[i] : null;
+  const a0 = ratio(0), aN = ratio(t.allan.adev.length - 1);
+  setText('cap-allan', `Overlapping Allan deviation over m = 1…${n0(t.allan.m_used)} periods. Pulses are slaved to the RF drive, so arrival-time noise does not accumulate: independent errors follow the dashed τ⁻¹ line. `
+    + (a0 === null ? 'Every pulse peaks at the same sample here, so σ_t = 0 and there is nothing to compare. '
+                   : `Measured ÷ line = ${f(a0, 2)} at τ = T and ${f(aN, 2)} at the longest τ; below 1 means consecutive arrival errors are correlated. A τ⁻¹ᐟ² slope would mean independent period-to-period fluctuations, and a rise as τ⁺¹ᐟ² a period that wanders. `)
+    + `dt quantisation limits single-period y to ${sci(t.allan.resolution)}.`);
+
+  // power
+  plot($('cv-power'), [{ x: w.hist.x, y: w.hist.counts, label: 'pulses', kind: 'bars', color: '--s1', binWidth: w.hist.bin_mW }], {
+    height: H, xlabel: 'peak power (mW)', ylabel: 'pulses per bin',
+  });
+  setText('cap-power', `⟨P⟩ = ${f(w.mean_mW, 2)} mW, CV = ${f(w.cv, 3)}. Peak ÷ mid-period (t = T/2) photon density: ${w.peak_to_mid_dB === null ? '—' : f(w.peak_to_mid_dB, 1) + ' dB'}.`);
+
+  // phase trace
+  plot($('cv-trace'), [{ x: p.trace.index, y: p.trace.phi, label: 'φ', kind: 'dots', color: '--s1', r: 1.5 }], {
+    height: 220, xlabel: 'pulse number', ylabel: 'peak phase φ (rad)', yRange: [-Math.PI, Math.PI],
+  });
+  setText('cap-trace', `The first ${n0(p.trace.index.length)} pulses. A coherent train drifts as a slow curve; a randomised one fills the band from −π to π.`);
+}
+
+/* ---------------- start ---------------- */
+async function init() {
+  try {
+    META = await api('/api/pulses/meta');
+  } catch (err) { showError(`The source explorer back end did not load: ${err.message}`); setStatus('error', 'err'); return; }
+  $('laser').textContent = ''; META.lasers.forEach(l => $('laser').add(new Option(l.name, l.key)));
+  $('shape').textContent = ''; META.shapes.forEach(s => $('shape').add(new Option(s.name, s.key)));
+  $('preset').textContent = ''; META.presets.forEach(p => $('preset').add(new Option(p.label, p.key)));
+  $('preset').add(new Option('Custom (edited)', '__custom'));
+  applyPreset(META.presets[0].key);
+  FORM_DIRTY = false;
+  await refreshDatasets();
+  await refreshEstimate();
+  pollJobs();
+  setStatus(META.warm ? 'ready' : 'compiling the kernel…', META.warm ? '' : 'busy');
+  await simulate();          // open on a realistic working state: the Chapter 5 operating point
+}
+
+function applyPreset(key) {
+  const p = META.presets.find(x => x.key === key);
+  if (!p) return;
+  $('preset').value = key;
+  formFromSpec(p.spec);
+  setText('presethint', p.note);
+}
+
+$('preset').addEventListener('change', e => {
+  applyPreset(e.target.value);
+  FORM_DIRTY = true;                           // setting up a run: a finishing job must not overwrite it
+  scheduleEstimate();
+});
+$('controls').addEventListener('input', e => {
+  if (e.target.id !== 'preset' && e.target.id !== 'hsn') {
+    FORM_DIRTY = true;
+    $('preset').value = '__custom'; setText('presethint', 'Edited from a preset.');
+  }
+  syncVisibility(); scheduleEstimate();
+});
+$('controls').addEventListener('change', () => { syncVisibility(); scheduleEstimate(); });
+$('controls').addEventListener('submit', simulate);
+$('bg').addEventListener('click', submitJob);
+['psi', 'bins', 'maxlag', 'gate', 'allanm', 'acfseries'].forEach(id => {
+  $(id).addEventListener('input', knobChanged); $(id).addEventListener('change', knobChanged);
+});
+$('dataset').addEventListener('change', e => openDataset(e.target.value, true));
+window.addEventListener('themechange', () => { if (LAST) render(LAST); });
+let resizeTimer = null;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (LAST) render(LAST); }, 120); });
+
+init();
+</script>
+</body>
+</html>

@@ -15,5 +15,13 @@ from gsdfb.analysis import (
     allan_deviation,
     amzi_outputs,
     amzi_splitting_ratio,
+    intensity_autocorrelation,
+    bartlett_bound,
+    surrogate_acf_envelope,
+    arcsine_cdf,
+    arcsine_bin_density,
+    amplitude_contrast,
+    eta_null_cdf,
+    ks_distance,
 )
 from gsdfb.plotting import setup_plotting, save_fig, STYLE

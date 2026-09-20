@@ -7,6 +7,13 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Virtual environments (jax-env holds 400 MB of .dylib files GitHub rejects)
+jax-env/
+.venv/
+venv/
+env/
+*.egg-info/
+
 # OS
 .DS_Store
 

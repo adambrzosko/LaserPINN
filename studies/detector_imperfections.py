@@ -55,6 +55,7 @@ from numba import njit
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from gsdfb import save_fig
 
 from core.dfb_laser import DFBLaserParams, q
 
@@ -376,7 +377,7 @@ if __name__ == '__main__':
 
     def save(fig, name):
         p = os.path.join(OUT, name)
-        fig.savefig(p)
+        save_fig(fig, p, bbox_inches=None, pad_inches=None)
         plt.close(fig)
         print(f"  Saved: {p}")
 

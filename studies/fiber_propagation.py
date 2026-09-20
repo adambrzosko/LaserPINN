@@ -303,7 +303,7 @@ if __name__ == '__main__':
             ax.set_xlim(-8 * fwhm0 * 1e12, 8 * fwhm0 * 1e12)
 
     plt.tight_layout()
-    fig1.savefig('images/fiber_propagation/pulse_evolution.png', dpi=150)
+    save_fig(fig1, 'images/fiber_propagation/pulse_evolution.png', dpi=150)
     print("\n  Saved: images/fiber_propagation/pulse_evolution.png")
 
     # ── Figure 2: Spectral evolution through fiber ────────────────────
@@ -350,7 +350,7 @@ if __name__ == '__main__':
             ax.set_xlim(-4 * bw0 * 1e-9, 4 * bw0 * 1e-9)
 
     plt.tight_layout()
-    fig2.savefig('images/fiber_propagation/spectral_evolution.png', dpi=150)
+    save_fig(fig2, 'images/fiber_propagation/spectral_evolution.png', dpi=150)
     print("  Saved: images/fiber_propagation/spectral_evolution.png")
 
     # ── Figure 3: Chirp evolution ─────────────────────────────────────
@@ -404,7 +404,7 @@ if __name__ == '__main__':
             ax.set_xlim(-6 * fwhm0 * 1e12, 6 * fwhm0 * 1e12)
 
     plt.tight_layout()
-    fig3.savefig('images/fiber_propagation/chirp_evolution.png', dpi=150)
+    save_fig(fig3, 'images/fiber_propagation/chirp_evolution.png', dpi=150)
     print("  Saved: images/fiber_propagation/chirp_evolution.png")
 
     # ── Figure 4: Dispersion penalty summary ──────────────────────────
@@ -474,7 +474,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig4.savefig('images/fiber_propagation/dispersion_penalty.png', dpi=150)
+    save_fig(fig4, 'images/fiber_propagation/dispersion_penalty.png', dpi=150)
     print("  Saved: images/fiber_propagation/dispersion_penalty.png")
 
     # ── Figure 5: SLD effect on dispersion ────────────────────────────
@@ -517,7 +517,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig5.savefig('images/fiber_propagation/sld_dispersion_effect.png', dpi=150)
+    save_fig(fig5, 'images/fiber_propagation/sld_dispersion_effect.png', dpi=150)
     print("  Saved: images/fiber_propagation/sld_dispersion_effect.png")
 
     plt.close('all')

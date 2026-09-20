@@ -596,7 +596,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig1.savefig('images/multimode/time_resolved_free.png', dpi=150)
+    save_fig(fig1, 'images/multimode/time_resolved_free.png', dpi=150)
     print("\n  Saved: images/multimode/time_resolved_free.png")
 
     # ── Figure 2: Time-resolved — SLD-injected ───────────────────────
@@ -645,7 +645,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig2.savefig('images/multimode/time_resolved_sld.png', dpi=150)
+    save_fig(fig2, 'images/multimode/time_resolved_sld.png', dpi=150)
     print("  Saved: images/multimode/time_resolved_sld.png")
 
     # ── Figure 3: SMSR distribution and mode partition noise ──────────
@@ -702,7 +702,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig3.savefig('images/multimode/mpn_statistics.png', dpi=150)
+    save_fig(fig3, 'images/multimode/mpn_statistics.png', dpi=150)
     print("  Saved: images/multimode/mpn_statistics.png")
 
     # ── Figure 4: Multi-mode vs single-mode comparison ────────────────
@@ -761,7 +761,7 @@ if __name__ == '__main__':
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig4.savefig('images/multimode/multimode_vs_singlemode.png', dpi=150)
+    save_fig(fig4, 'images/multimode/multimode_vs_singlemode.png', dpi=150)
     print("  Saved: images/multimode/multimode_vs_singlemode.png")
 
     # ── Figure 5: Pulse-train overlay — 5 consecutive pulses ─────────
@@ -823,7 +823,7 @@ if __name__ == '__main__':
             ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig5.savefig('images/multimode/pulse_train_modes.png', dpi=150)
+    save_fig(fig5, 'images/multimode/pulse_train_modes.png', dpi=150)
     print("  Saved: images/multimode/pulse_train_modes.png")
 
     plt.close('all')

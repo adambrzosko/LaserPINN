@@ -9,6 +9,15 @@ dependencies = [
     "matplotlib",
 ]
 
+# Apple Metal GPU backend. Versions are pinned because the Metal plugin only
+# works against matching jax/jaxlib.  Install with: pip install -e ".[jax]"
+[project.optional-dependencies]
+jax = [
+    "jax==0.11.1",
+    "jaxlib==0.11.1",
+    "jax-metal==0.1.1",
+]
+
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"

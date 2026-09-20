@@ -14,6 +14,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from gsdfb import save_fig
 from scipy.integrate import solve_ivp
 from dataclasses import dataclass, field
 
@@ -611,7 +612,7 @@ if __name__ == '__main__':
 
     print("\n  1/5  SLD spatial profiles...")
     fig1, sld_result = plot_sld_output(sld, I_sld)
-    fig1.savefig('sld_profiles.png', dpi=150)
+    save_fig(fig1, 'sld_profiles.png', dpi=150, bbox_inches=None, pad_inches=None)
     print(f"       P_out = {sld_result['P_out']*1e3:.2f} mW  "
           f"({'converged' if sld_result['converged'] else 'NOT converged'} "
           f"in {sld_result['n_iter']} iters)")
@@ -619,7 +620,7 @@ if __name__ == '__main__':
 
     print("\n  2/5  SLD L-I curve...")
     fig2 = plot_sld_LI_curve(sld)
-    fig2.savefig('sld_li_curve.png', dpi=150)
+    save_fig(fig2, 'sld_li_curve.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: sld_li_curve.png")
 
     # ── 2. Set up DFB laser + injection ───────────────────────────────────
@@ -641,7 +642,7 @@ if __name__ == '__main__':
     # ── 3. Injection comparison ───────────────────────────────────────────
     print("\n  3/5  Injection comparison (free-running vs injected)...")
     fig3 = plot_injection_comparison(laser, I_bias, inj, S_inj)
-    fig3.savefig('injection_comparison.png', dpi=150)
+    save_fig(fig3, 'injection_comparison.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: injection_comparison.png")
 
     # ── 4. Injection locking map ──────────────────────────────────────────
@@ -653,7 +654,7 @@ if __name__ == '__main__':
         15,
     )
     fig4, stab = plot_injection_locking_map(laser, I_bias, S_inj_vals, delta_nu_vals)
-    fig4.savefig('injection_locking_map.png', dpi=150)
+    save_fig(fig4, 'injection_locking_map.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: injection_locking_map.png")
 
     # ── 5. Strong injection locking ───────────────────────────────────────
@@ -662,7 +663,7 @@ if __name__ == '__main__':
     inj_strong.compute_derived(laser)
     S_inj_strong = S_inj * 50
     fig5 = plot_injection_comparison(laser, I_bias, inj_strong, S_inj_strong, t_end=30e-9)
-    fig5.savefig('injection_locking_strong.png', dpi=150)
+    save_fig(fig5, 'injection_locking_strong.png', dpi=150, bbox_inches=None, pad_inches=None)
     print("       Saved: injection_locking_strong.png")
 
     plt.close('all')
