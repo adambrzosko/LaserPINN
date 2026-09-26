@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fiber.constants import c, hbar
 from fiber.gmmnlse import GMMNLSE, ModeCoupling, ModeLoss, TimeGrid
 from fiber.grin_modes import DESIGNS, FibreDesign, FibreModes
-from fiber.raman_models import BlowWood, LinAgrawal
+from fiber.raman_models import BlowWood, HollenbeckCantrell, LinAgrawal
 from fiber.vector_modes import constituents, label as vector_label, radial_azimuthal, vector_field
 
 HERE = Path(__file__).resolve().parent
@@ -348,7 +348,8 @@ def run_propagation(req):
     nl = req.get('nonlinear_terms', 'phase_matched')
     coherence_tol = {'phase_matched': None, 'complete': float('inf')}.get(nl, None)
     raman_model = (None if nl == 'kerr_only'
-                   else BlowWood() if req.get('raman_model') == 'blow_wood' else LinAgrawal())
+                   else {'blow_wood': BlowWood, 'hollenbeck_cantrell': HollenbeckCantrell}
+                   .get(req.get('raman_model'), LinAgrawal)())
     if raman_model is None and noise == 'mean':
         raise ValueError("noise='mean' needs a Raman model; choose Kerr + Raman, or turn noise off")
     disp_order = req.get('dispersion_order')

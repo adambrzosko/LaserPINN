@@ -250,7 +250,15 @@ fiber/constants.py       CODATA constants (via scipy): c, h, hbar, kB. The singl
 fiber/raman_models.py    Frequency-domain silica Raman responses: BlowWood (single oscillator) and
                           LinAgrawal (2006, adds the boson peak): peak g_R 5.8e-14 m/W at 1550 nm (vs
                           5.1e-14), and 1.4x / 2.2x more gain than Blow-Wood at 0.4 / 3 THz, where WDM
-                          channel spacings sit. gain_shape / spontaneous_shape give the FDT weights.
+                          channel spacings sit. HollenbeckCantrell (2002; the model in Woodward's
+                          thesis): 13 Voigt-broadened vibrational modes, closed-form transform via the
+                          Faddeeva function; f_R = 0.18 gives peak g_R 4.7e-14 m/W, f_R = 0.22 matches
+                          LinAgrawal's peak. gain_shape / spontaneous_shape give the FDT weights.
+fiber/attenuation.py     SpectralLoss: alpha(lambda) = Rayleigh lam^-4 + flat excess + UV and IR
+                          absorption tails + Gaussian OH lines (Walker form, as in Woodward's thesis),
+                          NNLS-fitted to datasheet points; smf28_ultra() is fitted to Corning's
+                          SMF-28 Ultra maxima. Pass as FiberParams(loss_model=...) or as GMMNLSE's
+                          alpha_dB_km / ModeLoss.base_dB_km; the multimode_fiber family stays scalar.
 fiber/grin_modes.py      Scalar LP-mode solver for alpha-profile GRIN and step-index fibres (finite-
                           volume radial eigenproblem, Malitson Sellmeier cladding, fixed Delta n):
                           beta_p(omega) fitted per mode over a span, guided-band masks, normalised
@@ -310,6 +318,8 @@ Validated in `tests/test_fiber_engine.py` against four independent physics check
 `tests/test_quantum_wdm.py` validates `QuantumWDMPropagator`: single-channel-limit consistency (intra-channel noise arrays match `QuantumRamanPropagator`'s exactly, inter-channel noise gain is identically zero with no peer channel), and the same Stokes/anti-Stokes physics as the single-mode quantum-noise test but for the inter-channel mechanism -- a strong channel spontaneously seeds noise in an initially-empty peer channel on the Raman gain side even at T~0, exactly zero on the loss side at T~0, and nonzero on the loss side once thermally activated (T=500K).
 
 `tests/test_four_wave_mixing.py` validates FWM: efficiency eta=1 exactly at perfect phase matching (both lossy and lossless limits) and decreases with wider channel spacing; non-degenerate FWM generates exactly D^2=4x the degenerate power for otherwise identical parameters (a direct check of the formula's internal consistency); and a classic equally-spaced 3-channel comb produces a ghost tone landing exactly on the middle channel's own slot -- the textbook reason equal WDM channel spacing is avoided in real high-power systems -- correctly found and summed by `fwm_ghost_tone_power`.
+
+`tests/test_spectral_models.py` validates the Hollenbeck-Cantrell Raman model and the spectral loss: the closed-form Faddeeva transform matches a direct numerical Fourier integral of the 13-mode time response to 1.5e-6, with H(0) = 1 and the gain peak at 13.20 THz; intermodal Raman gain in `GMMNLSE` with this model matches the analytic exp[(n2 omega/c) S gain_shape P0 L] to 2e-3; `smf28_ultra()` reproduces the Corning maxima to 0.006 dB/km with A_R = 0.88 dB/km um^4; a wavelength-flat `SpectralLoss` reproduces the scalar alpha exactly (bit-for-bit) in `FiberPropagator`, `WDMPropagator`, `PolarizationPropagator` and `GMMNLSE` including its mean-noise path; and in linear propagation every frequency bin, and every WDM channel at its own carrier, decays as exp(-alpha(lambda) L) to 1e-11 nepers across a 4 dB spectral tilt.
 
 `tests/test_polarization.py` validates `PolarizationPropagator`: exact reduction to `FiberPropagator` (0.00e+00 difference) when launched purely into one component with no PMD; exact power conservation under strong PMD with no loss/nonlinearity (2.7e-14 relative error); the cross-polarization XPM phase matching `gamma*(2/3)*P_pump*L` to within a few percent; and, via Jones Matrix Eigenanalysis on the composed per-step operators (isolating the underlying stochastic process from any particular pulse's response to it), RMS accumulated DGD matching the `D_PMD*sqrt(L)` scaling across a 16x range in length.
 

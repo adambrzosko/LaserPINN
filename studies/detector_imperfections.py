@@ -35,15 +35,14 @@ results are therefore independent of the number of samples per window, which
 removes the ambiguity in the original analysis code.
 
 Outputs (images/detector_imperfections/):
-    noisy_noiseless.png       intensity distribution with and without noise
-    shifted_unshifted.png     intensity distribution with and without offset
-    noisy_shifted.png         both imperfections combined
+    intensity_distributions.png  noise, offset, and both, as panels (a)-(c) (Fig. 6.4)
     SNRmeas_variance.png      true / estimated noise and measured variance
     estimatedSNR.png          true against inferred SNR
-    noise_recovery.png        quantitative test of the noise estimate (TODO 1)
+    noise_recovery.png        noise estimate and inferred signal variance (Fig. 6.5)
+    noise_recovery_orders.png the same, one row per order m = 2, 3, 4
     gm_noise.png              g2, g3, g4 bias from noise            (TODO 2)
-    gm_noise_shift.png        g2, g3, g4 bias from noise + offset   (TODO 2)
-    correction_efficacy.png   raw against noise-corrected estimates
+    gm_noise_shift.png        g2, g3, g4 bias from noise + offset   (Fig. 6.6)
+    correction_efficacy.png   raw against noise-corrected estimates (Fig. 6.7)
 
 Run from the Simulations/ root:
     python3 -m studies.detector_imperfections
@@ -156,7 +155,243 @@ def correct(I, I_e):
     return eta * (I + x)
 
 
+# ── Figures ──────────────────────────────────────────────────────────────────
+
+# Style of the Chapter 6 figures, shared with studies/plots.ipynb (its style cell
+# at the top): inward and minor ticks, grid, 18 pt text.  Applied only inside the
+# Fig. 6.4 to 6.7 functions, so the other diagnostic figures keep their layout.
+NB_STYLE = {
+    'font.size': 18, 'axes.labelsize': 18, 'axes.titlesize': 18, 'figure.labelsize': 18,
+    'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 16,
+    'xtick.direction': 'in', 'ytick.direction': 'in',
+    'xtick.major.size': 6, 'ytick.major.size': 6,
+    'xtick.major.width': 1.2, 'ytick.major.width': 1.2,
+    'xtick.minor.size': 3, 'ytick.minor.size': 3,
+    'xtick.minor.width': 1.0, 'ytick.minor.width': 1.0,
+    'xtick.minor.visible': True, 'ytick.minor.visible': True,
+    'axes.grid': True,
+    'axes.formatter.use_mathtext': True,
+    'figure.dpi': 150, 'savefig.dpi': 200, 'savefig.bbox': 'tight',
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+
+def plot_distributions(I_sig, offset, save, snr_demo=5.0, seed=7, bins=200,
+                       zbins=150, headroom=1.35, xscale=1e23):
+    """Fig. 6.4: intensity histograms with noise, baseline shift, and both.
+
+    One figure of three panels sharing a single pair of axis labels.  The demo
+    noise is set at 5 dB, which widens the distribution by ~15 %; panel (a) is
+    zoomed and drawn with translucent fills plus step outlines so the two
+    distributions stay distinguishable.  The same figure is produced by the
+    Chapter 6 cell of studies/plots.ipynb.
+    """
+    from matplotlib.colors import to_rgba
+    from matplotlib.patches import Patch
+    V_e_demo = np.var(I_sig) / 10.0 ** (snr_demo / 10.0)
+    noise_d = np.random.default_rng(seed).normal(0.0, np.sqrt(V_e_demo), I_sig.size)
+    # Intensities are divided by xscale, whose power goes in the x label.
+    I_noisy = (I_sig + noise_d) / xscale
+    I_shifted = (I_sig - offset) / xscale
+    I_both = (I_sig - offset + noise_d) / xscale
+    I_ref = I_sig / xscale
+    shared = np.linspace(min(I_both.min(), I_ref.min()) * 0.98,
+                         max(I_noisy.max(), I_ref.max()) * 1.02, bins)
+
+    with plt.rc_context(NB_STYLE):
+        fig, axes = plt.subplots(1, 3, figsize=(16.0, 5.0), constrained_layout=True)
+
+        # (a) noise: zoomed onto the data, light fills plus full-opacity outlines
+        ax = axes[0]
+        lo, hi = np.percentile(np.concatenate([I_noisy, I_ref]), [0.005, 99.995])
+        pad = 0.05 * (hi - lo)
+        zb = np.linspace(lo - pad, hi + pad, zbins)
+        styles = ((I_ref, 'Noiseless', 'tab:orange', 0.35, '-', 2),
+                  (I_noisy, 'Noisy', 'tab:blue', 0.15, '--', 3))
+        for data, lab, col, fa, ls, z in styles:
+            ax.hist(data, bins=zb, color=col, alpha=fa, zorder=z)
+            ax.hist(data, bins=zb, histtype='step', color=col, lw=1.6, ls=ls,
+                    zorder=z + 2)
+        ax.set_xlim(zb[0], zb[-1])
+        ax.legend(handles=[Patch(facecolor=to_rgba(col, fa), edgecolor=col, ls=ls,
+                                 lw=1.6, label=lab)
+                           for _, lab, col, fa, ls, _ in styles[::-1]])
+
+        # (b) offset and (c) both: two filled histograms on the shared range
+        for ax, (a, la), (b, lb) in (
+                (axes[1], (I_shifted, 'Shifted'), (I_ref, 'Unshifted')),
+                (axes[2], (I_both, 'Noisy and shifted'), (I_ref, 'Ideal'))):
+            ax.hist(a, bins=shared, alpha=0.85, label=la)
+            ax.hist(b, bins=shared, alpha=0.55, label=lb)
+            ax.legend(loc='upper left')
+
+        for ax, tag in zip(axes, 'abc'):
+            ax.set_ylim(0, headroom * ax.get_ylim()[1])
+            ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+            ax.set_title(f'({tag})', loc='left', fontweight='bold')
+        fig.supxlabel(rf'Integrated intensity $I$ ($10^{{{np.log10(xscale):.0f}}}$ arb. units)')
+        fig.supylabel('Counts')
+        save(fig, 'intensity_distributions.png')
+
+
+def plot_noise_recovery(snr, V_e_true, V_e_meas, V_meas, V_sig, vs_mean, vs_lo, vs_hi,
+                        save, linthresh=1e-4):
+    """Fig. 6.5: (a) noise estimate and measured variance, (b) inferred variance.
+
+    Panel (a) is normalised to Var[I_signal] and drawn on a log scale, since the
+    noise falls a decade per 10 dB.  Panel (b) is the relative error of the
+    signal variance inferred as Var[I] - Var[I_e], with its 95 % interval.  The
+    same figure is produced by the Chapter 6 cell of studies/plots.ipynb.
+    """
+    with plt.rc_context(NB_STYLE):
+        fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(14.0, 5.5), constrained_layout=True)
+
+        ax_a.plot(snr, V_e_true / V_sig, '-', c='tab:blue', lw=1.4, label='Noise (true)')
+        ax_a.plot(snr, V_e_meas / V_sig, 'o', ms=5, c='tab:orange', label='Noise (estimated)')
+        ax_a.plot(snr, V_meas / V_sig, 'o', ms=5, c='tab:green', label='Measured')
+        ax_a.axhline(1.0, ls='--', c='k', lw=1, label='Signal (noise-free)')
+        ax_a.set_yscale('log')
+        ax_a.set_xlabel('SNR [dB]')
+        ax_a.set_ylabel(r'Variance / $\mathrm{Var}[I_{\rm signal}]$')
+        ax_a.legend()
+
+        ax_b.plot(snr, vs_mean, 'o', ms=5, color='tab:green')
+        ax_b.fill_between(snr, vs_lo, vs_hi, alpha=0.25, color='tab:green',
+                          label='95% interval')
+        ax_b.axhline(0.0, ls='--', c='k', lw=1)
+        ax_b.set_yscale('symlog', linthresh=linthresh)
+        ax_b.set_xlabel('SNR [dB]')
+        ax_b.set_ylabel(r'Inferred $\mathrm{Var}[I_{\rm signal}]$, relative error')
+        ax_b.legend()
+
+        for ax, tag in ((ax_a, '(a)'), (ax_b, '(b)')):     # as titles, above the axes
+            ax.set_title(tag, loc='left', fontweight='bold')
+        save(fig, 'noise_recovery.png')
+
+
+
+def _plot_gm_pairs(snr, orders, g_true, first, second, labels, save, name):
+    """One panel per order: two g^(m)(0) curves against SNR, noise-free value dashed.
+
+    Used for Fig. 6.6, in the notebook style; the x label is common to all panels.
+    The same figure is produced by the Chapter 6 cell of studies/plots.ipynb.
+    """
+    with plt.rc_context(NB_STYLE):
+        fig, axes = plt.subplots(1, len(orders), figsize=(16.0, 5.0),
+                                 constrained_layout=True, squeeze=False)
+        for ax, tag, m in zip(axes[0], 'abcdefgh', orders):
+            ax.plot(snr, first[m], 'o', ms=5, c='tab:blue', label=labels[0])
+            ax.plot(snr, second[m], 'o', ms=5, c='tab:orange', label=labels[1])
+            ax.axhline(g_true[m], ls='--', c='k', lw=1, label=labels[2])
+            ax.set_ylabel(f'$g^{{({m})}}(0)$')
+            ax.set_title(f'({tag})', loc='left', fontweight='bold')
+        axes[0, 0].legend()
+        fig.supxlabel('SNR [dB]')
+        save(fig, name)
+
+
+def plot_noise_shift(snr, orders, g_true, g_noise, g_shift, save):
+    """Fig. 6.6: uncorrected g^(m)(0) with noise alone and with noise plus offset."""
+    _plot_gm_pairs(snr, orders, g_true, g_noise, g_shift,
+                   ('Noise', 'Noise and offset', 'Neither'), save, 'gm_noise_shift.png')
+
+
+def plot_correction_efficacy(snr, orders, excess_bias, corr_mean, corr_lo, corr_hi, save,
+                             linthresh=1e-4, tol=0.05):
+    """Fig. 6.7: bias of g^(m)(0) as a fraction of the excess, before and after correction.
+
+    excess_bias, corr_mean, corr_lo, corr_hi map order to arrays over the SNR sweep:
+    the uncorrected bias (mean over realisations), the corrected bias (mean) and the
+    2.5th / 97.5th percentiles of single corrected realisations.  Symlog axis, shared
+    across the panels, with one legend above them.  The same figure is produced by the
+    Chapter 6 cell of studies/plots.ipynb.
+    """
+    with plt.rc_context(NB_STYLE):
+        fig, axes = plt.subplots(1, len(orders), figsize=(16.0, 5.0),
+                                 constrained_layout=True, squeeze=False, sharey=True)
+        for ax, tag, m in zip(axes[0], 'abcdefgh', orders):
+            ax.plot(snr, excess_bias[m], 'o', ms=5, c='tab:blue', label='Uncorrected')
+            ax.plot(snr, corr_mean[m], 'o', ms=5, c='tab:orange', label='Corrected')
+            ax.fill_between(snr, corr_lo[m], corr_hi[m], color='tab:orange',
+                            alpha=0.25, lw=0, label='95% interval')
+            ax.axhline(0.0, ls='--', c='k', lw=1)
+            if tol is not None:
+                ax.axhline(tol, ls=':', c='k', lw=1.2, label=f'{tol:.0%} of excess')
+            ax.set_yscale('symlog', linthresh=linthresh)
+            ax.set_title(f'({tag})  $m = {m}$', loc='left', fontweight='bold')
+        fig.legend(*axes[0, 0].get_legend_handles_labels(), loc='outside upper center',
+                   ncol=4, frameon=False)
+        fig.supxlabel('SNR [dB]')
+        fig.supylabel(r'$\Delta g^{(m)} / (g^{(m)}-1)$')
+        save(fig, 'correction_efficacy.png')
+
+
+def gaussian_noise_excess(m, V_e, mean_I, g_sig):
+    """Contribution of zero-mean Gaussian noise of variance V_e to g^(m) - 1.
+
+    Expanding <(I + e)^m> with e independent of I and Gaussian,
+
+        <(I+e)^m> - <I^m> = sum_{k even >= 2} C(m,k) <I^(m-k)> (k-1)!! V_e^(k/2),
+
+    and dividing by <I>^m gives the shift in the estimator.  g_sig maps each
+    order j < m to the noise-free g^(j)(0) (g^(0) = g^(1) = 1 are filled in).
+    For m = 2 this is V_e / <I>^2, i.e. V_e / Var[I_signal] times (g2 - 1).
+    """
+    from math import comb
+    g = {0: 1.0, 1: 1.0, **g_sig}
+    r = np.asarray(V_e, dtype=float) / mean_I ** 2
+    out = np.zeros_like(r)
+    for k in range(2, m + 1, 2):
+        out = out + comb(m, k) * g[m - k] * np.prod(np.arange(k - 1, 0, -2)) * r ** (k // 2)
+    return out
+
+
+def plot_noise_recovery_orders(snr, orders, g_true, g_noise, g_corr, V_e_true, mean_I,
+                               corr_mean, corr_lo, corr_hi, save, linthresh=1e-4,
+                               row_height=5.0, name='noise_recovery_orders.png'):
+    """Fig. 6.5 generalised to higher orders: one row of (a), (b) per order m.
+
+    Every quantity is expressed relative to the noise-free excess g^(m) - 1,
+    which for m = 2 is Var[I_signal] / <I>^2, so the m = 2 row reproduces
+    Fig. 6.5 in the excess form.
+      (a) Measured: g^(m)_meas - 1.  Noise (true): the shift that the injected
+          Gaussian noise produces, gaussian_noise_excess().  Noise (estimated):
+          the shift the pre-pulse correction removes, g^(m)_meas - g^(m)_corr.
+      (b) Relative error of the corrected excess, with its 95 % interval.
+    g_true maps order to the noise-free value; g_noise, g_corr, corr_* map
+    order to arrays over the SNR sweep.
+    """
+    with plt.rc_context(NB_STYLE):
+        n = len(orders)
+        fig, axes = plt.subplots(n, 2, figsize=(14.0, row_height * n), sharex=True,
+                                 constrained_layout=True, squeeze=False)
+        tags = iter('abcdefghijklmnop')
+        for (ax_a, ax_b), m in zip(axes, orders):
+            ex = g_true[m] - 1.0
+            ax_a.plot(snr, gaussian_noise_excess(m, V_e_true, mean_I, g_true) / ex, '-',
+                      c='tab:blue', lw=1.4, label='Noise (true)')
+            ax_a.plot(snr, (g_noise[m] - g_corr[m]) / ex, 'o', ms=5, c='tab:orange',
+                      label='Noise (estimated)')
+            ax_a.plot(snr, (g_noise[m] - 1.0) / ex, 'o', ms=5, c='tab:green', label='Measured')
+            ax_a.axhline(1.0, ls='--', c='k', lw=1, label='Signal (noise-free)')
+            ax_a.set_yscale('log')
+            ax_a.set_ylabel(rf'Excess of $g^{{({m})}}$ / $(g^{{({m})}}_{{\rm signal}}-1)$')
+
+            ax_b.plot(snr, corr_mean[m], 'o', ms=5, color='tab:green')
+            ax_b.fill_between(snr, corr_lo[m], corr_hi[m], alpha=0.25, color='tab:green',
+                              label='95% interval')
+            ax_b.axhline(0.0, ls='--', c='k', lw=1)
+            ax_b.set_yscale('symlog', linthresh=linthresh)
+            ax_b.set_ylabel(rf'Corrected $g^{{({m})}}-1$, relative error')
+
+            for ax in (ax_a, ax_b):     # as titles, clear of the legend and the data
+                ax.set_title(f'({next(tags)})', loc='left', fontweight='bold')
+        axes[0, 0].legend()
+        axes[0, 1].legend()
+        for ax in axes[-1]:
+            ax.set_xlabel('SNR [dB]')
+        save(fig, name)
 
 if __name__ == '__main__':
 
@@ -381,28 +616,7 @@ if __name__ == '__main__':
         plt.close(fig)
         print(f"  Saved: {p}")
 
-    SNR_DEMO = 15.0
-    V_e_demo = V_sig / 10.0 ** (SNR_DEMO / 10.0)
-    rng_d = np.random.default_rng(7)
-    noise_d = rng_d.normal(0.0, np.sqrt(V_e_demo), I_sig.size)
-    I_noisy = I_sig + noise_d
-    I_shifted = I_sig - offset
-    I_both = I_sig - offset + noise_d
-
-    bins = np.linspace(min(I_both.min(), I_sig.min()) * 0.98,
-                       max(I_noisy.max(), I_sig.max()) * 1.02, 200)
-
-    for name, (a, la), (b, lb) in [
-            ('noisy_noiseless.png', (I_noisy, 'Noisy'), (I_sig, 'Noiseless')),
-            ('shifted_unshifted.png', (I_shifted, 'Shifted'), (I_sig, 'Unshifted')),
-            ('noisy_shifted.png', (I_both, 'Noisy and shifted'), (I_sig, 'Ideal'))]:
-        fig, ax = plt.subplots(figsize=(5.6, 4.2))
-        ax.hist(a, bins=bins, alpha=0.85, label=la)
-        ax.hist(b, bins=bins, alpha=0.55, label=lb)
-        ax.set_xlabel('Integrated intensity $I$ (arb.)')
-        ax.set_ylabel('Counts')
-        ax.legend()
-        save(fig, name)
+    plot_distributions(I_sig, offset, save)
 
     # Variance of the measured, estimated-noise and true-noise distributions
     fig, ax = plt.subplots(figsize=(5.8, 4.4))
@@ -426,30 +640,14 @@ if __name__ == '__main__':
     ax.legend()
     save(fig, 'estimatedSNR.png')
 
-    # Quantitative behaviour: analytic law and the inferred signal variance
-    fig, axes = plt.subplots(1, 2, figsize=(10.0, 4.0), constrained_layout=True)
-    ax = axes[0]
-    for m, mk, ms in zip(ORDERS, ('o', 's', '^'), (9, 5, 3)):
-        ax.plot(SNR_DB, np.abs(excess_bias[m]), mk, ms=ms, mfc='none',
-                label=f'$g^{{({m})}}$')
-    ax.plot(SNR_DB, analytic, '-', c='k', lw=1.2,
-            label=r'$10^{-\mathrm{SNR}/10}$')
-    ax.axhline(TOL, ls=':', c='tab:red', lw=1.2, label=f'{TOL*100:.0f}% of excess')
-    ax.set_yscale('log')
-    ax.set_xlabel('SNR [dB]')
-    ax.set_ylabel(r'$|g^{(m)}_{\rm meas}-g^{(m)}|\,/\,(g^{(m)}-1)$')
-    ax.legend()
-
-    ax = axes[1]
-    ax.plot(SNR_DB, vs_mean, '.', color='tab:green')
-    ax.fill_between(SNR_DB, vs_lo, vs_hi, alpha=0.25, color='tab:green',
-                    label='95% interval')
-    ax.axhline(0.0, ls='--', c='k', lw=1)
-    ax.set_yscale('symlog', linthresh=1e-4)
-    ax.set_xlabel('SNR [dB]')
-    ax.set_ylabel(r'Inferred $\mathrm{Var}[I_{\rm signal}]$, relative error')
-    ax.legend()
-    save(fig, 'noise_recovery.png')
+    plot_noise_recovery(SNR_DB, mean['V_e_true'], mean['V_e_meas'], mean['V_meas'],
+                        V_sig, vs_mean, vs_lo, vs_hi, save)
+    plot_noise_recovery_orders(
+        SNR_DB, ORDERS, g_true,
+        {m: mean[f'g{m}_noise'] for m in ORDERS}, {m: mean[f'g{m}_corr'] for m in ORDERS},
+        mean['V_e_true'], mean_sig,
+        {m: corr_bias[m][0] for m in ORDERS}, {m: corr_bias[m][1] for m in ORDERS},
+        {m: corr_bias[m][2] for m in ORDERS}, save)
 
     # g^(m) bias, noise only
     fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.0), constrained_layout=True)
@@ -461,16 +659,9 @@ if __name__ == '__main__':
         ax.legend()
     save(fig, 'gm_noise.png')
 
-    # g^(m) bias, noise and offset
-    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.0), constrained_layout=True)
-    for ax, m in zip(axes, ORDERS):
-        ax.plot(SNR_DB, mean[f'g{m}_noise'], '.', label='Noise')
-        ax.plot(SNR_DB, mean[f'g{m}_shift'], '.', label='Noise and offset')
-        ax.axhline(g_true[m], ls='--', c='k', lw=1, label='Neither')
-        ax.set_xlabel('SNR [dB]')
-        ax.set_ylabel(f'$g^{{({m})}}(0)$')
-        ax.legend()
-    save(fig, 'gm_noise_shift.png')
+    # g^(m) bias, noise and offset (Fig. 6.6)
+    plot_noise_shift(SNR_DB, ORDERS, g_true, {m: mean[f'g{m}_noise'] for m in ORDERS},
+                     {m: mean[f'g{m}_shift'] for m in ORDERS}, save)
 
     # Relative bias, all orders on one axis
     fig, ax = plt.subplots(figsize=(5.8, 4.4))
@@ -484,16 +675,11 @@ if __name__ == '__main__':
     ax.legend()
     save(fig, 'gm_relative_bias.png')
 
-    # Efficacy of the noise correction
-    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.0), constrained_layout=True)
-    for ax, m in zip(axes, ORDERS):
-        ax.plot(SNR_DB, mean[f'g{m}_noise'], '.', label='Uncorrected')
-        ax.plot(SNR_DB, mean[f'g{m}_corr'], '.', label='Corrected')
-        ax.axhline(g_true[m], ls='--', c='k', lw=1, label='No noise')
-        ax.set_xlabel('SNR [dB]')
-        ax.set_ylabel(f'$g^{{({m})}}(0)$')
-        ax.legend()
-    save(fig, 'correction_efficacy.png')
+    # Efficacy of the noise correction (Fig. 6.7)
+    plot_correction_efficacy(SNR_DB, ORDERS, excess_bias,
+                             {m: corr_bias[m][0] for m in ORDERS},
+                             {m: corr_bias[m][1] for m in ORDERS},
+                             {m: corr_bias[m][2] for m in ORDERS}, save)
 
     np.savez(os.path.join(OUT, 'detector_imperfections.npz'),
              snr_db=SNR_DB, orders=np.array(ORDERS),

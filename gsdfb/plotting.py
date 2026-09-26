@@ -6,8 +6,13 @@ all analysis scripts. Replaces 24 copies of matplotlib.use('Agg') +
 style boilerplate.
 """
 import os
+import sys
 import matplotlib
-matplotlib.use('Agg')
+# Scripts only write files, so they use the non-interactive Agg backend and
+# run headless. Inside IPython or Jupyter the session's backend is left alone;
+# forcing Agg there would stop figures displaying inline in a notebook.
+if 'IPython' not in sys.modules:
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 

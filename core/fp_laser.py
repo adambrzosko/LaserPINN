@@ -141,6 +141,9 @@ def solve_fp_stochastic(
     spont_gain_weighted: bool = False,
     fwm_coupling: float = 0.0,
     fast_gain: float = 0.0,
+    feedback_kappa: float = 0.0,
+    feedback_delay: float = 0.0,
+    feedback_phase: float = 0.0,
 ):
     """Euler-Maruyama solver for M-mode FP laser, complex-field formulation.
 
@@ -206,6 +209,8 @@ def solve_fp_stochastic(
     # SLD injection rate (density / photon lifetime), per mode
     R_SLD = max(S_inj_density, 0.0) / params.tau_p
 
+    n_delay = int(round(feedback_delay / dt)) if feedback_kappa else 0
+
     E = E_arr[0, :].copy()
 
     for k in range(n_steps - 1):
@@ -244,6 +249,11 @@ def solve_fp_stochastic(
 
         # Mode frequency offsets: each mode rotates at its own rate
         E = E * np.exp(1j * domega_j * dt)
+
+        if n_delay and k >= n_delay:
+            # Lang-Kobayashi delayed feedback from an external reflection. E_arr already
+            # carries each mode's own rotation, so only the common carrier phase applies.
+            E = E + feedback_kappa * dt * E_arr[k - n_delay] * np.exp(1j * feedback_phase)
 
         if fast_gain:
             # Gain saturates on the INSTANTANEOUS intracavity intensity, not the
@@ -321,6 +331,9 @@ def gain_switch_fp(
     spont_gain_weighted: bool = False,
     fwm_coupling: float = 0.0,
     fast_gain: float = 0.0,
+    feedback_kappa: float = 0.0,
+    feedback_delay: float = 0.0,
+    feedback_phase: float = 0.0,
 ):
     """Gain-switch the FP laser and return per-pulse, per-mode peak fields.
 
@@ -380,6 +393,9 @@ def gain_switch_fp(
         spont_gain_weighted=spont_gain_weighted,
         fwm_coupling=fwm_coupling,
         fast_gain=fast_gain,
+        feedback_kappa=feedback_kappa,
+        feedback_delay=feedback_delay,
+        feedback_phase=feedback_phase,
     )
 
     t = sol['t']

@@ -5,6 +5,9 @@ Solves the generalized nonlinear Schrodinger equation for the field
 envelope A(z,t), with |A|^2 in Watts:
 
     dA/dz = -alpha/2*A - i*(beta2/2)*d2A/dt2 + (beta3/6)*d3A/dt3
+
+alpha is applied in the frequency domain, so a fiber with a loss_model
+(fiber.attenuation) attenuates each frequency at its own alpha(omega).
             + i*gamma*A*[(1-f_R)*|A|^2 + f_R*(h_R (x) |A|^2)]
 
 The delayed Raman convolution h_R (x) |A|^2 is applied in the frequency
@@ -83,7 +86,8 @@ class FiberPropagator:
                if self.include_raman else None)
         self._prepare(Omega, dt)
 
-        D_half = np.exp((-self.fiber.alpha / 2
+        alpha = self.fiber.alpha_at(self.fiber.omega0 - Omega)
+        D_half = np.exp((-alpha / 2
                           + 1j * self.fiber.beta2 / 2 * Omega ** 2
                           - 1j * self.fiber.beta3 / 6 * Omega ** 3) * dz / 2)
 

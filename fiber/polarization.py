@@ -144,7 +144,7 @@ class PolarizationPropagator:
         H_R = (raman_response_freq_analytic(self.fiber.material, Omega)
                if self.include_raman else None)
 
-        base = (-self.fiber.alpha / 2
+        base = (-self.fiber.alpha_at(self.fiber.omega0 - Omega) / 2
                 + 1j * self.fiber.beta2 / 2 * Omega ** 2
                 - 1j * self.fiber.beta3 / 6 * Omega ** 3)
         D_half = np.exp(base * dz / 2)  # (n_pts,), shared by both components

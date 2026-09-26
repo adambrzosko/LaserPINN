@@ -29,6 +29,10 @@ class FiberParams:
     alpha_dB_km: float = 0.2          # attenuation (dB/km)
     D: float = 17.0                   # dispersion (ps/nm/km) -> beta2
     beta3: float = 0.07e-39           # third-order dispersion (s^3/m)
+    loss_model: object = None         # fiber.attenuation.SpectralLoss for alpha(lambda); when
+                                      # set it REPLACES alpha_dB_km, which is recomputed as
+                                      # the model's value at lambda0 (use .anchored() to pin a
+                                      # measured value there instead)
 
     # Derived (SI), filled in __post_init__
     alpha: float = field(init=False)   # power loss coefficient (1/m)
@@ -40,11 +44,22 @@ class FiberParams:
                                            # fiber.wdm_propagator.WDMPropagator's delta_beta0
 
     def __post_init__(self):
+        if self.loss_model is not None:
+            self.alpha_dB_km = float(self.loss_model.dB_km(self.lambda0))
         self.alpha = self.alpha_dB_km / (10 * np.log10(np.e)) / 1e3
         self.beta2 = -self.D * 1e-6 * self.lambda0 ** 2 / (2 * np.pi * c)
         self.gamma = 2 * np.pi * self.material.n2 / (self.lambda0 * self.geometry.A_eff)
         self.omega0 = 2 * np.pi * c / self.lambda0
         self.beta1_ref = self.material.n_g / c
+
+    def alpha_at(self, omega):
+        """Power attenuation (1/m) at absolute angular frequency omega (rad/s).
+
+        With no loss_model this is the scalar alpha, so propagators that call it reduce
+        exactly to their frequency-flat behaviour."""
+        if self.loss_model is None:
+            return self.alpha
+        return self.loss_model.per_m(2 * np.pi * c / np.asarray(omega, dtype=float))
 
 
 # Approximate, order-of-magnitude presets -- adjust D/alpha_dB_km/beta3/A_eff
@@ -80,13 +95,16 @@ def make_fiber(fiber_type='smf28', material_overrides=None, geometry_overrides=N
     material_overrides, geometry_overrides : dict, optional
         Overrides passed through to make_material()/make_geometry().
     **overrides
-        Override any top-level FiberParams field (lambda0, alpha_dB_km, D, beta3).
+        Override any top-level FiberParams field (lambda0, alpha_dB_km, D, beta3,
+        loss_model).
 
     Examples
     --------
     >>> smf = make_fiber('smf28')
     >>> hnlf = make_fiber('hnlf', alpha_dB_km=0.6)
     >>> hot_smf = make_fiber('smf28', material_overrides=dict(T=350.0))
+    >>> from fiber.attenuation import smf28_ultra
+    >>> spectral_smf = make_fiber('smf28', loss_model=smf28_ultra())
     """
     if fiber_type not in FIBER_PRESETS:
         raise ValueError(f"Unknown fiber_type {fiber_type!r}. Choose from {list(FIBER_PRESETS)}.")

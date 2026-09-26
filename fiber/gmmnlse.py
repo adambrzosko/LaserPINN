@@ -176,7 +176,8 @@ class ModeLoss:
     ModeCoupling's kappa it has no datasheet value and should be calibrated against a
     measured bend-loss curve. bend_radius=None is a straight fibre.
 
-    base_dB_km : fundamental-mode attenuation (dB/km)
+    base_dB_km : fundamental-mode attenuation (dB/km), or a fiber.attenuation.SpectralLoss
+        for a wavelength-dependent base under the mode-dependent excess
     dma_dB_km : excess dB/km at unit cladding-power fraction
     bend_radius : bend radius (m), or None
     bend_prefactor_dB_km : macrobend prefactor C (dB/km)
@@ -186,8 +187,11 @@ class ModeLoss:
     bend_radius: float = None
     bend_prefactor_dB_km: float = 1e4
 
-    def dB_km(self, modes, p):
-        loss = self.base_dB_km + self.dma_dB_km * modes.cladding_power_fraction(p)
+    def dB_km(self, modes, p, wavelength=None):
+        base = self.base_dB_km
+        if hasattr(base, 'dB_km'):
+            base = base.dB_km(modes.wavelength if wavelength is None else wavelength)
+        loss = base + self.dma_dB_km * modes.cladding_power_fraction(p)
         if self.bend_radius:
             gamma = modes.guidance_margin(p)
             if gamma <= 0:
@@ -238,8 +242,9 @@ class GMMNLSE:
     raman : model from fiber.raman_models, or None for Kerr only
     alpha_dB_km : float, a dict of label -> dB/km with an optional 'default' key, or a
         ModeLoss deriving each mode's loss from its profile (differential mode attenuation
-        and macrobend loss). The default 0.3 is the OM3 C-band figure; pass 0.2 for
-        SMF-28 at 1550 nm
+        and macrobend loss). A fiber.attenuation.SpectralLoss (here or as the ModeLoss
+        base) makes the loss wavelength dependent across the grid. The default 0.3 is the
+        OM3 C-band figure; pass 0.2 for SMF-28 at 1550 nm
     self_steepening : bool
     noise : 'none', 'mean' or 'stochastic'
     polarisation : None for a scalar (co-polarised) run, or one label per propagated field,
@@ -337,9 +342,14 @@ class GMMNLSE:
         return self.modes.index_of(p) if isinstance(p, str) else int(p)
 
     def _alpha(self, p):
+        """Power attenuation (1/m) of mode p: a scalar, or an array over the grid when the
+        loss is wavelength dependent."""
         spec = self._alpha_spec
+        wavelength = 2 * np.pi * c / self.grid.omega
         if isinstance(spec, ModeLoss):
-            dB = spec.dB_km(self.modes, p)
+            dB = spec.dB_km(self.modes, p, wavelength)
+        elif hasattr(spec, 'dB_km'):
+            dB = spec.dB_km(wavelength)
         elif isinstance(spec, dict):
             dB = spec.get(self.modes.labels[p], spec.get('default', 0.0))
         else:
@@ -521,9 +531,9 @@ class GMMNLSE:
         self._k_gain = gain_shape(self.raman, offsets)
         omega = g.omega
         self._guided_q = np.asarray([self.modes.is_guided(q, omega) for q in self.noise_modes])
-        self._alpha_q = np.where(self._guided_q,
-                                 np.asarray([self._alpha(q) for q in self.noise_modes])[:, None],
-                                 2 * _UNGUIDED_LOSS)
+        alpha_q = np.asarray([np.broadcast_to(self._alpha(q), omega.shape)
+                              for q in self.noise_modes])
+        self._alpha_q = np.where(self._guided_q, alpha_q, 2 * _UNGUIDED_LOSS)
         self._psd = np.zeros((len(self.noise_modes), N))
 
     def _convolve(self, kernel, pw):

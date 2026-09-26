@@ -168,11 +168,14 @@ class WDMPropagator:
         H_R = (raman_response_freq_analytic(self.fiber.material, Omega)
                if self.include_raman else None)
 
-        base = (-self.fiber.alpha / 2
-                + 1j * self.fiber.beta2 / 2 * Omega ** 2
+        # each channel's physical frequency is omega0 + offset - Omega, so a loss_model
+        # attenuates every channel at its own carrier (and across its own band)
+        alpha = self.fiber.alpha_at(self.fiber.omega0 + self.channel_offsets[:, None]
+                                    - Omega[None, :])
+        base = (1j * self.fiber.beta2 / 2 * Omega ** 2
                 - 1j * self.fiber.beta3 / 6 * Omega ** 3)
         D_half = np.exp(
-            (base[None, :] - 1j * self.delta_beta1[:, None] * Omega[None, :]) * dz / 2
+            (-alpha / 2 + base[None, :] - 1j * self.delta_beta1[:, None] * Omega[None, :]) * dz / 2
         )  # (N, n_pts)
 
         gamma = self.fiber.gamma
